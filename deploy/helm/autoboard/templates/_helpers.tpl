@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "autobreadboard.name" -}}
+{{- define "autoboard.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
@@ -10,7 +10,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "autobreadboard.fullname" -}}
+{{- define "autoboard.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
@@ -26,29 +26,29 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Chart name and version label value.
 */}}
-{{- define "autobreadboard.chart" -}}
+{{- define "autoboard.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 Common labels — applied to every resource.
 */}}
-{{- define "autobreadboard.labels" -}}
-helm.sh/chart: {{ include "autobreadboard.chart" . }}
-{{ include "autobreadboard.selectorLabels" . }}
+{{- define "autoboard.labels" -}}
+helm.sh/chart: {{ include "autoboard.chart" . }}
+{{ include "autoboard.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-app.kubernetes.io/part-of: autobreadboard
+app.kubernetes.io/part-of: autoboard
 environment: {{ .Values.global.environment | quote }}
 {{- end -}}
 
 {{/*
 Selector labels — used in matchLabels; must be stable across revisions.
 */}}
-{{- define "autobreadboard.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "autobreadboard.name" . }}
+{{- define "autoboard.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "autoboard.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
@@ -56,8 +56,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Component selector labels (api / worker / frontend / migrate) used in matchLabels
 of Deployments/Services/Jobs and in NetworkPolicies.
 */}}
-{{- define "autobreadboard.componentSelectorLabels" -}}
-{{ include "autobreadboard.selectorLabels" . }}
+{{- define "autoboard.componentSelectorLabels" -}}
+{{ include "autoboard.selectorLabels" . }}
 app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
@@ -67,11 +67,11 @@ Prefers an externally-managed Secret (set via secrets.existingSecret); otherwise
 falls back to the dev-only inline Secret this chart renders when
 secrets.dev.enabled=true (secrets.dev.secretName).
 */}}
-{{- define "autobreadboard.secretName" -}}
+{{- define "autoboard.secretName" -}}
 {{- if .Values.secrets.existingSecret -}}
 {{- .Values.secrets.existingSecret -}}
 {{- else if .Values.secrets.dev.enabled -}}
-{{- default (printf "%s-dev" (include "autobreadboard.fullname" .)) .Values.secrets.dev.secretName -}}
+{{- default (printf "%s-dev" (include "autoboard.fullname" .)) .Values.secrets.dev.secretName -}}
 {{- end -}}
 {{- end -}}
 

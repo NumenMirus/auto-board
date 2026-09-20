@@ -7,14 +7,14 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-api
+  name: {{ include "autoboard.fullname" . }}-api
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
 spec:
   minAvailable: 1
   selector:
     matchLabels:
-      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      {{- include "autoboard.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: api
 {{- end }}
 {{- if gt (int .Values.frontend.replicaCount) 1 }}
@@ -22,14 +22,14 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-frontend
+  name: {{ include "autoboard.fullname" . }}-frontend
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
 spec:
   minAvailable: 1
   selector:
     matchLabels:
-      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      {{- include "autoboard.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: frontend
 {{- end }}
 {{- end }}

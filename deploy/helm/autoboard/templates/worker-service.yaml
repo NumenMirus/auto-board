@@ -5,13 +5,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-worker-metrics
+  name: {{ include "autoboard.fullname" . }}-worker-metrics
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
   annotations:
     # Document the role of this Service so operators know it is scrape-only.
-    autobreadboard.example.com/role: worker-metrics
+    autoboard.example.com/role: worker-metrics
 spec:
   type: ClusterIP
   clusterIP: None
@@ -21,5 +21,5 @@ spec:
       targetPort: metrics
       protocol: TCP
   selector:
-    {{- include "autobreadboard.selectorLabels" . | nindent 4 }}
+    {{- include "autoboard.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: worker

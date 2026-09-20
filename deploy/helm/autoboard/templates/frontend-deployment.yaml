@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-frontend-config
+  name: {{ include "autoboard.fullname" . }}-frontend-config
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
     app.kubernetes.io/component: frontend
 data:
   # runtime-config.js is injected into index.html before the app bundle so the
@@ -19,23 +19,23 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-frontend
+  name: {{ include "autoboard.fullname" . }}-frontend
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
     app.kubernetes.io/component: frontend
 spec:
   replicas: {{ .Values.frontend.replicaCount }}
   selector:
     matchLabels:
-      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      {{- include "autoboard.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: frontend
   template:
     metadata:
       labels:
-        {{- include "autobreadboard.labels" . | nindent 8 }}
+        {{- include "autoboard.labels" . | nindent 8 }}
         app.kubernetes.io/component: frontend
     spec:
-      serviceAccountName: {{ include "autobreadboard.fullname" . }}
+      serviceAccountName: {{ include "autoboard.fullname" . }}
       automountServiceAccountToken: false
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -104,5 +104,5 @@ spec:
             sizeLimit: 16Mi
         - name: runtime-config
           configMap:
-            name: {{ include "autobreadboard.fullname" . }}-frontend-config
+            name: {{ include "autoboard.fullname" . }}-frontend-config
       terminationGracePeriodSeconds: {{ .Values.frontend.terminationGracePeriodSeconds | default 10 }}

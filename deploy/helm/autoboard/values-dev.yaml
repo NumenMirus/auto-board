@@ -4,7 +4,7 @@
 #
 # NOTE on Postgres/Redis/S3 in kind: this chart does not ship a dev-dependencies
 # subchart. The dev Secret below points at in-namespace service DNS names
-# (`postgres.autobreadboard.svc.cluster.local:5432`, etc.) and a follow-up
+# (`postgres.autoboard.svc.cluster.local:5432`, etc.) and a follow-up
 # `deploy/local/dev-dependencies.yaml` is expected to provide those Services.
 # Until that lands, override secrets.dev.* here with a reachable host (e.g.
 # `host.docker.internal:5432` if running an external Compose stack on the host).
@@ -15,21 +15,21 @@ global:
 
 api:
   image:
-    repository: autobreadboard-api
+    repository: autoboard-api
     tag: latest
     pullPolicy: Never
   replicaCount: 1
 
 worker:
   image:
-    repository: autobreadboard-api
+    repository: autoboard-api
     tag: latest
     pullPolicy: Never
   replicaCount: 1
 
 frontend:
   image:
-    repository: autobreadboard-frontend
+    repository: autoboard-frontend
     tag: latest
     pullPolicy: Never
   replicaCount: 1
@@ -39,7 +39,7 @@ ingress:
   className: nginx
   annotations: {}
   hosts:
-    - host: autobreadboard.localtest.me
+    - host: autoboard.localtest.me
       paths:
         - path: /
           pathType: Prefix
@@ -54,10 +54,10 @@ config:
   logLevel: DEBUG
   corsOrigins:
     - http://localhost:8080
-    - http://autobreadboard.localtest.me
+    - http://autoboard.localtest.me
   trustedHosts:
     - localhost
-    - autobreadboard.localtest.me
+    - autoboard.localtest.me
 
 secrets:
   existingSecret: ""
@@ -67,15 +67,15 @@ secrets:
     # Plausible in-namespace DNS names. Replace these once
     # deploy/local/dev-dependencies.yaml exists, or point at an external
     # Compose stack via host.docker.internal:5432/6379/9000.
-    databaseUrl: "postgresql+asyncpg://autobreadboard:autobreadboard@postgres.autobreadboard.svc.cluster.local:5432/autobreadboard"
-    redisUrl: "redis://redis.autobreadboard.svc.cluster.local:6379/0"
+    databaseUrl: "postgresql+asyncpg://autoboard:autoboard@postgres.autoboard.svc.cluster.local:5432/autoboard"
+    redisUrl: "redis://redis.autoboard.svc.cluster.local:6379/0"
     s3AccessKeyId: "minioadmin"
     s3SecretAccessKey: "minioadmin"
 
 s3:
-  endpointUrl: "http://minio.autobreadboard.svc.cluster.local:9000"
+  endpointUrl: "http://minio.autoboard.svc.cluster.local:9000"
   region: us-east-1
-  bucket: autobreadboard
+  bucket: autoboard
   usePathStyle: "true"
 
 networkPolicy:

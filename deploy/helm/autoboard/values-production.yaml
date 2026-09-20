@@ -18,7 +18,7 @@ ingress:
   enabled: true
   className: nginx
   hosts:
-    - host: autobreadboard.example.com
+    - host: autoboard.example.com
       paths:
         - path: /
           pathType: Prefix
@@ -28,19 +28,19 @@ ingress:
           service: api
   tls:
     - hosts:
-        - autobreadboard.example.com
-      secretName: autobreadboard-production-tls
+        - autoboard.example.com
+      secretName: autoboard-production-tls
 
 config:
   environment: production
   logLevel: INFO
   corsOrigins:
-    - https://autobreadboard.example.com
+    - https://autoboard.example.com
   trustedHosts:
-    - autobreadboard.example.com
+    - autoboard.example.com
 
 secrets:
-  existingSecret: autobreadboard-runtime-production
+  existingSecret: autoboard-runtime-production
   dev:
     enabled: false
 

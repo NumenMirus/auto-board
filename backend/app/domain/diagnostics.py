@@ -49,6 +49,15 @@ DIAGNOSTIC_CATALOG: dict[str, tuple[DiagnosticSeverity, str]] = {
     # --- info --------------------------------------------------------
     "NET_CLASS_INFERRED": ("info", "Net {net} classified as {net_class} from its name"),
     "CLUSTER_ASSIGNED": ("info", "Component {ref} grouped with cluster anchor {anchor}"),
+    # --- perfboard-specific -------------------------------------------
+    "UNROUTED_TERMINAL": (
+        "error",
+        "Perfboard net {net} is missing one or more terminal connections: {pins}",
+    ),
+    "TRACE_CROSSING_UNAVOIDABLE": (
+        "warning",
+        "Perfboard trace layout has {count} unavoidable trace crossings",
+    ),
 }
 
 

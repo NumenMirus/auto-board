@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-worker
+  name: {{ include "autoboard.fullname" . }}-worker
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
   replicas: {{ .Values.worker.replicaCount }}
   selector:
     matchLabels:
-      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      {{- include "autoboard.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: worker
   template:
     metadata:
       labels:
-        {{- include "autobreadboard.labels" . | nindent 8 }}
+        {{- include "autoboard.labels" . | nindent 8 }}
         app.kubernetes.io/component: worker
     spec:
-      serviceAccountName: {{ include "autobreadboard.fullname" . }}
+      serviceAccountName: {{ include "autoboard.fullname" . }}
       automountServiceAccountToken: false
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -39,10 +39,10 @@ spec:
           command: ["python", "-m", "app.worker"]
           envFrom:
             - configMapRef:
-                name: {{ include "autobreadboard.fullname" . }}-config
-            {{- if include "autobreadboard.secretName" . }}
+                name: {{ include "autoboard.fullname" . }}-config
+            {{- if include "autoboard.secretName" . }}
             - secretRef:
-                name: {{ include "autobreadboard.secretName" . }}
+                name: {{ include "autoboard.secretName" . }}
             {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}

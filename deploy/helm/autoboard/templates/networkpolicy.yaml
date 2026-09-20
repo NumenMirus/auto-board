@@ -13,9 +13,9 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-default-deny
+  name: {{ include "autoboard.fullname" . }}-default-deny
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
 spec:
   podSelector: {}
   policyTypes:
@@ -25,13 +25,13 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-ingress-allow
+  name: {{ include "autoboard.fullname" . }}-ingress-allow
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      {{- include "autoboard.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:
@@ -49,7 +49,7 @@ spec:
     - from:
         - podSelector:
             matchLabels:
-              {{- include "autobreadboard.selectorLabels" . | nindent 14 }}
+              {{- include "autoboard.selectorLabels" . | nindent 14 }}
               app.kubernetes.io/component: frontend
       ports:
         - port: 8000
@@ -70,13 +70,13 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-egress-allow
+  name: {{ include "autoboard.fullname" . }}-egress-allow
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      {{- include "autoboard.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Egress
   egress:

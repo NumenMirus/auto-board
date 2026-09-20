@@ -11,7 +11,7 @@ global:
 
 api:
   image:
-    repository: ghcr.io/example/autobreadboard-api
+    repository: ghcr.io/example/autoboard-api
     tag: "sha-REPLACE"
     pullPolicy: IfNotPresent
   replicaCount: 2
@@ -33,7 +33,7 @@ api:
 
 worker:
   image:
-    repository: ghcr.io/example/autobreadboard-api
+    repository: ghcr.io/example/autoboard-api
     tag: "sha-REPLACE"
     # pullPolicy falls back to api.image.pullPolicy when unset.
   replicaCount: 1
@@ -51,7 +51,7 @@ worker:
 
 frontend:
   image:
-    repository: ghcr.io/example/autobreadboard-frontend
+    repository: ghcr.io/example/autoboard-frontend
     tag: "sha-REPLACE"
   replicaCount: 2
   terminationGracePeriodSeconds: 10
@@ -75,7 +75,7 @@ ingress:
   className: nginx
   annotations: {}
   hosts:
-    - host: autobreadboard.example.com
+    - host: autoboard.example.com
       paths:
         - path: /
           pathType: Prefix
@@ -91,9 +91,9 @@ config:
   apiHost: "0.0.0.0"
   apiPort: 8000
   corsOrigins:
-    - https://autobreadboard.example.com
+    - https://autoboard.example.com
   trustedHosts:
-    - autobreadboard.example.com
+    - autoboard.example.com
   solverDefaultTimeoutSeconds: 60
   solverMaxTimeoutSeconds: 600
   jobLockTtlSeconds: 900
@@ -105,7 +105,7 @@ config:
 # The dev-only inline Secret is only rendered when this is empty AND
 # secrets.dev.enabled is true.
 secrets:
-  existingSecret: autobreadboard-runtime
+  existingSecret: autoboard-runtime
   dev:
     enabled: false
     secretName: ""
@@ -120,7 +120,7 @@ secrets:
 postgres:
   host: postgres.example.internal
   port: 5432
-  database: autobreadboard
+  database: autoboard
   sslMode: require
 
 redis:
@@ -129,7 +129,7 @@ redis:
 s3:
   endpointUrl: ""
   region: us-east-1
-  bucket: autobreadboard
+  bucket: autoboard
   usePathStyle: "true"
   publicBaseUrl: ""
 

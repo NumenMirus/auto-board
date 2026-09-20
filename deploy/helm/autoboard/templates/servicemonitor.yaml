@@ -7,13 +7,13 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}
+  name: {{ include "autoboard.fullname" . }}
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
-      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      {{- include "autoboard.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: api
   endpoints:
     - port: http
@@ -26,14 +26,14 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-worker
+  name: {{ include "autoboard.fullname" . }}-worker
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
   selector:
     matchLabels:
-      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      {{- include "autoboard.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: worker
   endpoints:
     - port: metrics

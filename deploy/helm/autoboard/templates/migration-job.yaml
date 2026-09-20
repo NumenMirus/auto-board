@@ -2,9 +2,9 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "autobreadboard.fullname" . }}-migrate
+  name: {{ include "autoboard.fullname" . }}-migrate
   labels:
-    {{- include "autobreadboard.labels" . | nindent 4 }}
+    {{- include "autoboard.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrate
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
@@ -16,11 +16,11 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "autobreadboard.labels" . | nindent 8 }}
+        {{- include "autoboard.labels" . | nindent 8 }}
         app.kubernetes.io/component: migrate
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ include "autobreadboard.fullname" . }}
+      serviceAccountName: {{ include "autoboard.fullname" . }}
       automountServiceAccountToken: false
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -40,10 +40,10 @@ spec:
           command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed"]
           envFrom:
             - configMapRef:
-                name: {{ include "autobreadboard.fullname" . }}-config
-            {{- if include "autobreadboard.secretName" . }}
+                name: {{ include "autoboard.fullname" . }}-config
+            {{- if include "autoboard.secretName" . }}
             - secretRef:
-                name: {{ include "autobreadboard.secretName" . }}
+                name: {{ include "autoboard.secretName" . }}
             {{- end }}
           resources:
             {{- toYaml .Values.migration.resources | nindent 12 }}
