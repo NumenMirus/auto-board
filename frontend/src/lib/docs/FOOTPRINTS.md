@@ -61,14 +61,54 @@ at `(span, 0)` — but differ in span range and polarity.
 
 ## Three-pin parts
 
-| Id    | Pins  | Layout (offsets from anchor) | Orientations | Notes |
-|-------|-------|------------------------------|--------------|-------|
-| `TO-92` | 1, 2, 3 | pin 1 → (0,0), pin 2 → (1,0), pin 3 → (2,0) | 0, 90, 180, 270 | Approximate body; emits `APPROXIMATE_FOOTPRINT` at validation. |
+### `TO-92` (through-hole transistor, generic)
 
-Pin numbers follow the standard TO-92 convention when the part is flat-side
-toward you, leads down: **E–B–C** for most transistors (1 = emitter,
-2 = base, 3 = collector) and the equivalent mapping for regulators. Always
-verify against the part's datasheet.
+| Field | Value |
+|-------|-------|
+| Id | `TO-92` |
+| Pins | 1, 2, 3 |
+| Layout | pin 1 → (0,0), pin 2 → (1,0), pin 3 → (2,0) |
+| Orientations | 0, 90, 180, 270 |
+| Notes | Approximate body; emits `APPROXIMATE_FOOTPRINT` at validation. |
+
+`TO-92` is a **generic 3-pin inline footprint**. It does **not** assume any
+particular transistor pinout — pin 1 / 2 / 3 are positional labels only,
+not electrical labels. To make a project use a specific E/B/C mapping,
+assign one with `footprintOverrides` (see
+[`PROJECT_JSON.md`](./PROJECT_JSON.md)):
+
+```json
+{
+  "componentRef": "Q1",
+  "footprintId": "TO-92",
+  "pinMap": { "1": "E", "2": "B", "3": "C" }
+}
+```
+
+#### Common TO-92 pinouts (flat side toward you, leads down)
+
+There are six permutations; the part family determines which one applies.
+**Always check the specific datasheet.**
+
+| Permutation | Pin 1 | Pin 2 | Pin 3 | Example parts |
+|-------------|-------|-------|-------|---------------|
+| **EBC**     | Emitter  | Base    | Collector | BC547, BC557, 2N3904, 2N3906, BC107, BC108, BC109 |
+| **EBC flipped (BEC)** | Base | Emitter | Collector | Some European / older PNP |
+| **ECB**     | Emitter  | Collector | Base    | 2SC1815, some Japanese NPN |
+| **CBE**     | Collector | Base    | Emitter | Some older germanium (OC71) |
+| **CEB**     | Collector | Emitter | Base    | Less common |
+| **BCE**     | Base    | Collector | Emitter | Rare (some regulators) |
+
+For TO-220 / TO-126 / TO-39 / TO-18 / TO-5 the part numbers above are wrong;
+those packages have different layouts and are not in the registry.
+
+#### Orientation reminder
+
+When you read the flat-side-toward-you, leads-down view, "left to right"
+becomes "right to left" if you flip the part over to drop it into the
+board. The pin-number labels are relative to the part, not to your
+perspective. The assembler instructions print pin labels from `pinMap`,
+not raw numbers.
 
 ## Switches
 

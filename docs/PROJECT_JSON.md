@@ -199,16 +199,35 @@ Preset defaults:
 
 ## Footprint overrides
 
-Rare. Use when a part does not match its stock footprint (e.g. a 555 wired
-as an oscillator has different pin semantics than stock):
+Use when a part does not match its stock footprint pin semantics. Two common
+cases:
 
-```jsonc
-{
-  "componentRef": "U1",
-  "footprintId":  "DIP-8",
-  "pinMap":       { "1": "VCC", "2": "TRIG", "3": "OUT", "4": "RESET", "5": "CTRL", "6": "THR", "7": "DIS", "8": "GND" }
-}
-```
+- **Renaming DIP pins** for clarity in the BOM and assembly guide (a 555
+  wired as an oscillator has different pin semantics than stock):
+
+  ```jsonc
+  {
+    "componentRef": "U1",
+    "footprintId":  "DIP-8",
+    "pinMap":       { "1": "VCC", "2": "TRIG", "3": "OUT", "4": "RESET",
+                      "5": "CTRL", "6": "THR", "7": "DIS", "8": "GND" }
+  }
+  ```
+
+- **Choosing a transistor pinout.** `TO-92` is a generic 3-pin footprint;
+  pin 1 / 2 / 3 are positional. Pick the permutation your part family uses:
+
+  ```jsonc
+  { "componentRef": "Q1", "footprintId": "TO-92",
+    "pinMap": { "1": "E", "2": "B", "3": "C" } }   // EBC (BC547, 2N3904, …)
+  { "componentRef": "Q2", "footprintId": "TO-92",
+    "pinMap": { "1": "E", "2": "C", "3": "B" } }   // ECB (2SC1815, …)
+  ```
+
+  The pin numbers you put in `components[].pins` and `nets[].pins[*].pin`
+  stay as the positional ids `"1"`, `"2"`, `"3"`. The mapping above only
+  affects labels in the BOM, the assembly guide, and the SVG. See the
+  full TO-92 pinout table in [`FOOTPRINTS.md`](./FOOTPRINTS.md).
 
 `pinMap` does not affect the solver's electrical model; it only renames pins
 in the BOM and assembly instructions.
