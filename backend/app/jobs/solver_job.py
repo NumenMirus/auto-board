@@ -20,6 +20,8 @@ import queue
 import threading
 import time
 import traceback
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -38,18 +40,18 @@ from app.domain.boards.registry import get_board_model
 from app.domain.errors import DomainError, SolverCancelled, SolverTimeout
 from app.domain.footprints.registry import FOOTPRINTS
 from app.domain.index import BoardIndex
-from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS
-from app.domain.traces.solve import solve as trace_solve
 from app.domain.models import (
     BreadboardModel,
     Component,
     Layout,
-    PerfboardModel,
-    TraceLayout,
     Net,
+    PerfboardModel,
     ProjectDocument,
     SolverOptions,
+    TraceLayout,
 )
+from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS
+from app.domain.traces.solve import solve as trace_solve
 from app.repositories import jobs as jobs_repo
 from app.repositories import layouts as layouts_repo
 from app.settings import get_settings
@@ -228,7 +230,10 @@ async def run_solver_job(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[s
 
     timings: dict[str, float] = {}
     trace_payload: dict[str, Any] | None = None
-    result_layout: Layout | None = None
+    # Layout JSON — may be a breadboard Layout dump or a perfboard TraceLayout
+    # dump depending on the board kind. Stored as a dict so both pipelines can
+    # populate it uniformly; downstream persistence just persists the dict.
+    result_layout: dict[str, Any] | None = None
     result_diagnostics: list[dict[str, Any]] = []
     result_score: dict[str, Any] | None = None
     try:
@@ -244,148 +249,172 @@ async def run_solver_job(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[s
         if op == "export":
             raise DomainError("export is handled by run_export_job, not run_solver_job")
 
-        if op == "validate":
-            t0 = time.perf_counter()
-            diagnostics, score = await asyncio.to_thread(
-                domain_validate.validate_layout,
-                board,
-                index,
-                dict(FOOTPRINTS),
-                components,
-                nets,
-                layout,
-                options,
+        # Perfboard path: dispatch to the trace pipeline when the board is a
+        # PerfboardModel. Every other operation below assumes a breadboard.
+        if isinstance(board, PerfboardModel):
+            if op not in ("trace-route", "trace-solve"):
+                raise DomainError(f"operation {op!r} is not valid for perfboard {board.id!r}")
+            perf_result = await _run_perfboard_pipeline(
+                op=op,
+                board=board,
+                components=components,
+                nets=nets,
+                layout=layout,
+                options=options,
+                cancel=lambda: cancel_event.is_set(),
+                progress=lambda phase, percent: bridge.push(
+                    phase, percent, "info", None, f"{phase} {percent}%"
+                ),
+                timings=timings,
             )
-            timings["validate"] = (time.perf_counter() - t0) * 1000.0
-            for d in diagnostics:
-                SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
-            result_diagnostics = [d.model_dump(by_alias=True) for d in diagnostics]
-            result_score = score.model_dump(by_alias=True)
-            trace_payload = {"mode": "validate"}
-
-        elif op == "place":
-            t0 = time.perf_counter()
-            placement = await asyncio.to_thread(
-                domain_place.place,
-                board,
-                index,
-                dict(FOOTPRINTS),
-                components,
-                nets,
-                options,
-                layout,
-            )
-            timings["place"] = (time.perf_counter() - t0) * 1000.0
-            placed_layout = Layout(
-                version=1,
-                board_id=board.id,
-                placements=list(placement.placements),
-                jumpers=[],
-                manual_electrical_links=[],
-            )
-            t1 = time.perf_counter()
-            diagnostics, score = await asyncio.to_thread(
-                domain_validate.validate_layout,
-                board,
-                index,
-                dict(FOOTPRINTS),
-                components,
-                nets,
-                placed_layout,
-                options,
-            )
-            timings["verify"] = (time.perf_counter() - t1) * 1000.0
-            for d in diagnostics:
-                SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
-            result_layout = placed_layout
-            result_diagnostics = [d.model_dump(by_alias=True) for d in diagnostics]
-            result_score = score.model_dump(by_alias=True)
-            trace_payload = placement.trace.model_dump(by_alias=True)
-
-        elif op == "route":
-            t0 = time.perf_counter()
-            routing = await asyncio.to_thread(
-                domain_route.route,
-                board,
-                index,
-                dict(FOOTPRINTS),
-                components,
-                nets,
-                layout,
-                options,
-            )
-            timings["route"] = (time.perf_counter() - t0) * 1000.0
-            routed_layout = Layout(
-                version=1,
-                board_id=board.id,
-                placements=list(layout.placements),
-                jumpers=list(routing.jumpers),
-                manual_electrical_links=list(layout.manual_electrical_links),
-            )
-            t1 = time.perf_counter()
-            diagnostics, score = await asyncio.to_thread(
-                domain_validate.validate_layout,
-                board,
-                index,
-                dict(FOOTPRINTS),
-                components,
-                nets,
-                routed_layout,
-                options,
-            )
-            timings["verify"] = (time.perf_counter() - t1) * 1000.0
-            for d in diagnostics:
-                SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
-            result_layout = routed_layout
-            result_diagnostics = [d.model_dump(by_alias=True) for d in diagnostics]
-            result_score = score.model_dump(by_alias=True)
-            trace_payload = routing.trace.model_dump(by_alias=True)
-
-        elif op == "solve":
-            t0 = time.perf_counter()
-            solved = await asyncio.to_thread(
-                domain_solve.solve,
-                board,
-                index,
-                dict(FOOTPRINTS),
-                components,
-                nets,
-                options,
-                layout,
-                _cancel,
-                _progress,
-            )
-            timings["solve"] = (time.perf_counter() - t0) * 1000.0
-            for d in solved.diagnostics:
-                SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
-            result_layout = solved.layout
-            result_diagnostics = [d.model_dump(by_alias=True) for d in solved.diagnostics]
-            result_score = solved.score.model_dump(by_alias=True)
-            trace_payload = solved.trace.model_dump(by_alias=True) if solved.trace else None
-
-        elif op == "optimize":
-            t0 = time.perf_counter()
-            optimized = await asyncio.to_thread(
-                domain_solve.optimize,
-                board,
-                index,
-                dict(FOOTPRINTS),
-                components,
-                nets,
-                layout,
-                options,
-                _cancel,
-                _progress,
-            )
-            timings["optimize"] = (time.perf_counter() - t0) * 1000.0
-            for d in optimized.diagnostics:
-                SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
-            result_layout = optimized.layout
-            result_diagnostics = [d.model_dump(by_alias=True) for d in optimized.diagnostics]
-            result_score = optimized.score.model_dump(by_alias=True)
-            trace_payload = optimized.trace.model_dump(by_alias=True) if optimized.trace else None
+            result_layout = perf_result.layout
+            result_score = perf_result.score
+            result_diagnostics = perf_result.diagnostics
+            trace_payload = perf_result.trace
         else:
-            raise DomainError(f"unknown operation {op!r}")
+            assert index is not None  # every non-perfboard board carries a BoardIndex
+            if op == "validate":
+                t0 = time.perf_counter()
+                diagnostics, score = await asyncio.to_thread(
+                    domain_validate.validate_layout,
+                    board,
+                    index,
+                    dict(FOOTPRINTS),
+                    components,
+                    nets,
+                    layout,
+                    options,
+                )
+                timings["validate"] = (time.perf_counter() - t0) * 1000.0
+                for d in diagnostics:
+                    SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
+                result_diagnostics = [d.model_dump(by_alias=True) for d in diagnostics]
+                result_score = score.model_dump(by_alias=True)
+                trace_payload = {"mode": "validate"}
+
+            elif op == "place":
+                t0 = time.perf_counter()
+                placement = await asyncio.to_thread(
+                    domain_place.place,
+                    board,
+                    index,
+                    dict(FOOTPRINTS),
+                    components,
+                    nets,
+                    options,
+                    layout,
+                )
+                timings["place"] = (time.perf_counter() - t0) * 1000.0
+                placed_layout = Layout(
+                    version=1,
+                    board_id=board.id,
+                    placements=list(placement.placements),
+                    jumpers=[],
+                    manual_electrical_links=[],
+                )
+                t1 = time.perf_counter()
+                diagnostics, score = await asyncio.to_thread(
+                    domain_validate.validate_layout,
+                    board,
+                    index,
+                    dict(FOOTPRINTS),
+                    components,
+                    nets,
+                    placed_layout,
+                    options,
+                )
+                timings["verify"] = (time.perf_counter() - t1) * 1000.0
+                for d in diagnostics:
+                    SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
+                result_layout = placed_layout.model_dump(by_alias=True)
+                result_diagnostics = [d.model_dump(by_alias=True) for d in diagnostics]
+                result_score = score.model_dump(by_alias=True)
+                trace_payload = placement.trace.model_dump(by_alias=True)
+
+            elif op == "route":
+                t0 = time.perf_counter()
+                routing = await asyncio.to_thread(
+                    domain_route.route,
+                    board,
+                    index,
+                    dict(FOOTPRINTS),
+                    components,
+                    nets,
+                    layout,
+                    options,
+                )
+                timings["route"] = (time.perf_counter() - t0) * 1000.0
+                routed_layout = Layout(
+                    version=1,
+                    board_id=board.id,
+                    placements=list(layout.placements),
+                    jumpers=list(routing.jumpers),
+                    manual_electrical_links=list(layout.manual_electrical_links),
+                )
+                t1 = time.perf_counter()
+                diagnostics, score = await asyncio.to_thread(
+                    domain_validate.validate_layout,
+                    board,
+                    index,
+                    dict(FOOTPRINTS),
+                    components,
+                    nets,
+                    routed_layout,
+                    options,
+                )
+                timings["verify"] = (time.perf_counter() - t1) * 1000.0
+                for d in diagnostics:
+                    SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
+                result_layout = routed_layout.model_dump(by_alias=True)
+                result_diagnostics = [d.model_dump(by_alias=True) for d in diagnostics]
+                result_score = score.model_dump(by_alias=True)
+                trace_payload = routing.trace.model_dump(by_alias=True)
+
+            elif op == "solve":
+                t0 = time.perf_counter()
+                solved = await asyncio.to_thread(
+                    domain_solve.solve,
+                    board,
+                    index,
+                    dict(FOOTPRINTS),
+                    components,
+                    nets,
+                    options,
+                    layout,
+                    _cancel,
+                    _progress,
+                )
+                timings["solve"] = (time.perf_counter() - t0) * 1000.0
+                for d in solved.diagnostics:
+                    SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
+                result_layout = solved.layout.model_dump(by_alias=True)
+                result_diagnostics = [d.model_dump(by_alias=True) for d in solved.diagnostics]
+                result_score = solved.score.model_dump(by_alias=True)
+                trace_payload = solved.trace.model_dump(by_alias=True) if solved.trace else None
+
+            elif op == "optimize":
+                t0 = time.perf_counter()
+                optimized = await asyncio.to_thread(
+                    domain_solve.optimize,
+                    board,
+                    index,
+                    dict(FOOTPRINTS),
+                    components,
+                    nets,
+                    layout,
+                    options,
+                    _cancel,
+                    _progress,
+                )
+                timings["optimize"] = (time.perf_counter() - t0) * 1000.0
+                for d in optimized.diagnostics:
+                    SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
+                result_layout = optimized.layout.model_dump(by_alias=True)
+                result_diagnostics = [d.model_dump(by_alias=True) for d in optimized.diagnostics]
+                result_score = optimized.score.model_dump(by_alias=True)
+                trace_payload = optimized.trace.model_dump(by_alias=True) if optimized.trace else None
+            else:
+                raise DomainError(f"unknown operation {op!r}")
 
         new_layout_id: UUID | None = None
         if result_layout is not None:
@@ -396,7 +425,7 @@ async def run_solver_job(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[s
                     revision_id=job.revision_id,
                     source="solver",
                     solver_job_id=job_id,
-                    layout=result_layout.model_dump(by_alias=True),
+                    layout=result_layout,
                     score=result_score,
                     diagnostics=result_diagnostics,
                 )
@@ -498,14 +527,20 @@ async def run_solver_job(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[s
 async def _resolve_inputs(
     job: Any,
 ) -> tuple[
-    BreadboardModel,
-    BoardIndex,
+    BreadboardModel | PerfboardModel,
+    BoardIndex | None,
     list[Component],
     list[Net],
     Layout,
     SolverOptions,
 ]:
-    """Load the (board, index, components, nets, layout, options) tuple for ``job``."""
+    """Load the (board, index, components, nets, layout, options) tuple for ``job``.
+
+    ``index`` is ``None`` when ``board`` is a :class:`PerfboardModel` — the
+    breadboard-specific :class:`BoardIndex` (electrical groups, rail lattice,
+    center-gap row split) has no perfboard equivalent; perfboard routing
+    builds its own :class:`~app.domain.traces.maze.MazeGraph` instead.
+    """
     async with get_session() as session:
         project = await session.get(Project, job.project_id)
         if project is None:
@@ -518,7 +553,7 @@ async def _resolve_inputs(
 
     document = ProjectDocument.model_validate(document_dict)
     board = get_board_model(document.board.model_id)
-    index = BoardIndex.build(board)
+    index = BoardIndex.build(board) if isinstance(board, BreadboardModel) else None
     options = SolverOptions.model_validate(job.options)
     return (
         board,
@@ -527,4 +562,56 @@ async def _resolve_inputs(
         list(document.nets),
         document.layout,
         options,
+    )
+
+
+@dataclass(slots=True)
+class _PerfboardPipelineResult:
+    layout: dict[str, Any]
+    score: dict[str, Any]
+    diagnostics: list[dict[str, Any]]
+    trace: dict[str, Any] | None
+
+
+async def _run_perfboard_pipeline(
+    *,
+    op: str,
+    board: PerfboardModel,
+    components: list[Component],
+    nets: list[Net],
+    layout: Layout,
+    options: SolverOptions,
+    cancel: Callable[[], bool],
+    progress: Callable[[str, int], None],
+    timings: dict[str, float],
+) -> _PerfboardPipelineResult:
+    """Run the perfboard trace pipeline and return its results.
+
+    Both ``trace-route`` and ``trace-solve`` end up calling the same solver;
+    ``trace-solve`` is treated as ``trace-route`` because the perfboard
+    pipeline does not have a separate placement phase (placements come from
+    the input layout).
+    """
+    _ = op  # the dispatch is implicit; both ops invoke the same pipeline
+    initial_layout = TraceLayout(board_id=board.id, placements=list(layout.placements))
+    t0 = time.perf_counter()
+    solved = await asyncio.to_thread(
+        trace_solve,
+        board=board,
+        footprints=dict(PERFBOARD_FOOTPRINTS),
+        components=components,
+        nets=nets,
+        options=options,
+        initial_layout=initial_layout,
+        cancel=cancel,
+        progress=progress,
+    )
+    timings["trace-solve"] = (time.perf_counter() - t0) * 1000.0
+    for d in solved.diagnostics:
+        SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
+    return _PerfboardPipelineResult(
+        layout=solved.layout.model_dump(by_alias=True),
+        score=solved.score.model_dump(by_alias=True),
+        diagnostics=[d.model_dump(by_alias=True) for d in solved.diagnostics],
+        trace=solved.trace.model_dump(by_alias=True) if solved.trace is not None else None,
     )

@@ -13,9 +13,8 @@ requested layer.
 from __future__ import annotations
 
 import heapq
-from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from app.domain.models import Point, Via
 
@@ -73,7 +72,7 @@ class MazeGraph:
 
 
 def build_maze(rows: int, cols: int, pitch_mm: float, double_sided: bool) -> MazeGraph:
-    """Construct a regular ``rows × cols`` hole maze at the given pitch.
+    """Construct a regular ``rows x cols`` hole maze at the given pitch.
 
     Hole ids are ``"{r}-{c}"`` (matching :func:`app.domain.boards.perfboard.build_perfboard`).
     Each cardinal pair of adjacent holes on the same row/column is joined by an edge
@@ -155,12 +154,16 @@ def maze_route(
     if not graph.has_node(start) or not graph.has_node(end):
         return None
 
-    forbidden = {(a, b, l) for a, b, l in forbidden_edges}
+    forbidden = {(a, b, layer_name) for a, b, layer_name in forbidden_edges}
 
     def heuristic(hid: str) -> float:
         node = graph.nodes[hid]
         target = graph.nodes[end]
-        return (abs(node.row - target.row) + abs(node.col - target.col)) * (graph.nodes[start].point.x - target.point.x or 1.0) / 1.0
+        return (
+            (abs(node.row - target.row) + abs(node.col - target.col))
+            * (graph.nodes[start].point.x - target.point.x or 1.0)
+            / 1.0
+        )
 
     # State: (hole_id, layer)
     start_state = (start, start_layer)
@@ -232,7 +235,7 @@ def _reconstruct(
         prev = came_from.get(cur)
         if prev is None:
             break
-        prev_state, edge, is_via = prev
+        prev_state, _edge, is_via = prev
         if is_via:
             vias.append(Via(point=graph.nodes[cur[0]].point))
         cur = prev_state
@@ -252,7 +255,6 @@ def _reconstruct(
         # walking backwards via the state tuple. Simpler: use the layer at end
         # for the last edge; otherwise look at the destination state at each step.
         # For correctness we rebuild forward.
-        states_by_hole: list[tuple[str, str]] = []
         # Recover the actual states used by walking back, then reversing.
         state_path: list[tuple[str, str]] = []
         c = end_state

@@ -19,22 +19,12 @@ from app.db.session import get_session
 from app.repositories import exports as exports_repo
 from app.repositories import layouts as layouts_repo
 from app.services import storage
+from app.services.export import FORMAT_CONTENT_TYPES
 
 __all__ = ["bp"]
 
 
 bp = Blueprint("exports", url_prefix="/api/v1")
-
-
-_FORMAT_TO_CONTENT_TYPE: dict[str, str] = {
-    "svg": "image/svg+xml",
-    "png": "image/png",
-    "pdf": "application/pdf",
-    "json": "application/json",
-    "bom-csv": "text/csv",
-    "jumpers-csv": "text/csv",
-    "instructions-md": "text/markdown",
-}
 
 
 def _parse_uuid(raw: str) -> UUID:
@@ -66,13 +56,13 @@ async def create_export(request: Request, layout_id: str) -> HTTPResponse:
     lid = _parse_uuid(layout_id)
     body: dict[str, Any] = request.json or {}
     fmt = body.get("format")
-    if not isinstance(fmt, str) or fmt not in _FORMAT_TO_CONTENT_TYPE:
+    if not isinstance(fmt, str) or fmt not in FORMAT_CONTENT_TYPES:
         raise AppError(
             "VALIDATION_ERROR",
-            f"format must be one of {sorted(_FORMAT_TO_CONTENT_TYPE)}",
+            f"format must be one of {sorted(FORMAT_CONTENT_TYPES)}",
             status=422,
         )
-    content_type = _FORMAT_TO_CONTENT_TYPE[fmt]
+    content_type = FORMAT_CONTENT_TYPES[fmt]
 
     async with get_session() as session:
         layout = await layouts_repo.get_layout(session, lid)
@@ -147,4 +137,9 @@ def _ext_for(fmt: str) -> str:
         "bom-csv": "csv",
         "jumpers-csv": "csv",
         "instructions-md": "md",
+        "gerber-top": "gtl",
+        "gerber-bottom": "gbl",
+        "gerber-outline": "gko",
+        "drill": "drl",
+        "placement-csv": "csv",
     }[fmt]

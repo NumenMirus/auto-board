@@ -164,7 +164,7 @@ def test_board_index_builds_cleanly_for_split_board() -> None:
 
 def test_registry_lazy_loading() -> None:
     boards = BUILTIN_BOARDS
-    assert set(boards.keys()) == {
+    assert set(boards.keys()) >= {
         "half-400-standard-split-rails",
         "half-400-standard-continuous-rails",
     }

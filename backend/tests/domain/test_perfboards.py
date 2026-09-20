@@ -15,7 +15,6 @@ from app.domain.errors import InvalidInput
 from app.domain.models import PerfboardModel
 from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS, get_perfboard_footprint
 
-
 pytest_plugins: list[str] = []
 
 
@@ -27,7 +26,7 @@ def test_build_perfboard_default_double_layered_20x30() -> None:
     assert board.cols == 30
     assert board.layers == 2
     assert board.pitch_mm == 2.54
-    # 20 rows × 30 cols = 600 — every id is unique and deterministic
+    # 20 rows x 30 cols = 600 — every id is unique and deterministic
     ids = [h.id for h in board.holes]
     assert len(set(ids)) == 600
     assert ids[0] == "1-1" and ids[-1] == "20-30"
@@ -90,10 +89,24 @@ def test_builtin_registry_unknown_id_raises() -> None:
 def test_perfboard_footprint_registry_has_24_entries() -> None:
     assert len(PERFBOARD_FOOTPRINTS) == 24
     # Spot-check expected footprint ids
-    for fid in ("DIP-8", "DIP-14", "DIP-16", "DIP-20", "DIP-28",
-                "AXIAL-R", "AXIAL-DIODE", "RADIAL-CAP-2P",
-                "ELECTROLYTIC-CAP-2P", "LED-2P", "TO-92", "TACT-SW-4P",
-                "HEADER-1x2", "HEADER-1x10", "CONN-1x2", "CONN-1x4"):
+    for fid in (
+        "DIP-8",
+        "DIP-14",
+        "DIP-16",
+        "DIP-20",
+        "DIP-28",
+        "AXIAL-R",
+        "AXIAL-DIODE",
+        "RADIAL-CAP-2P",
+        "ELECTROLYTIC-CAP-2P",
+        "LED-2P",
+        "TO-92",
+        "TACT-SW-4P",
+        "HEADER-1x2",
+        "HEADER-1x10",
+        "CONN-1x2",
+        "CONN-1x4",
+    ):
         assert fid in PERFBOARD_FOOTPRINTS, fid
 
 

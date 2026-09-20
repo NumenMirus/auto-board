@@ -21,11 +21,9 @@ Routing strategy (per main spec §7.4 / Phase 1B plan):
 
 from __future__ import annotations
 
-import heapq
 import math
-from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from app.domain.errors import DomainError
 from app.domain.models import (
@@ -33,12 +31,12 @@ from app.domain.models import (
     ComponentPlacement,
     Net,
     Point,
+    ThroughHoleFootprint,
     Trace,
     TraceLayout,
     TraceSegment,
     Via,
 )
-from app.domain.perfboards.registry import ThroughHoleFootprint
 from app.domain.traces import maze
 
 __all__ = ["RouteResult", "route"]
@@ -148,51 +146,54 @@ def _path_to_segments(
         pa, pb = graph.nodes[a].point, graph.nodes[b].point
         seg_length = math.hypot(pb.x - pa.x, pb.y - pa.y)
         segments.append(
-            TraceSegment(start=Point(x=pa.x, y=pa.y), end=Point(x=pb.x, y=pb.y), layer=layer, width_mm=width_mm)
+            TraceSegment(
+                start=Point(x=pa.x, y=pa.y), end=Point(x=pb.x, y=pb.y), layer=layer, width_mm=width_mm
+            )
         )
         total_length += seg_length
     return segments, list(result.vias), total_length
 
 
-def _trace_cost(trace: Trace, graph: maze.MazeGraph) -> float:
+def _trace_cost(trace: Trace) -> float:
     """Cost ranking for rip-up: shorter is cheaper; vias add 5 each."""
     return trace.estimated_length_mm + 5.0 * float(len(trace.vias))
 
 
+def _hole_id_at(graph: maze.MazeGraph, point: Point) -> str | None:
+    """Reverse-lookup the hole id at ``point`` (coordinate round-trip)."""
+    for hid, node in graph.nodes.items():
+        if math.isclose(node.point.x, point.x) and math.isclose(node.point.y, point.y):
+            return hid
+    return None
+
+
 def _ripup_forbidden(
     traces: list[Trace],
-    failed_region: set[str],
+    graph: maze.MazeGraph,
     k: int,
 ) -> set[tuple[str, str, str]]:
-    """Pick the k highest-cost unlocked traces whose path intersects
-    ``failed_region``; emit the edges they used as forbidden for the next pass.
+    """Pick the k highest-cost unlocked traces and forbid the edges they used.
+
+    Ripping up a trace makes its path unavailable for the immediate retry,
+    forcing the router to find an alternative through the congested region
+    rather than repeatedly failing on the same dead end.
     """
-    candidates = [
-        t for t in traces
-        if not t.locked and any(seg.start and (seg.start.x is not None) for seg in t.segments)
-        and any(
-            any(p == hid for p in (s.start.x, s.start.y))  # noqa: not a perfect region match — see note
-            for s in t.segments
-            for hid in failed_region
-        )
-    ]
-    if not candidates:
-        candidates = [t for t in traces if not t.locked]
+    candidates = [t for t in traces if not t.locked]
     candidates.sort(key=_trace_cost, reverse=True)
     picked = candidates[:k]
     forbidden: set[tuple[str, str, str]] = set()
     for trace in picked:
         for seg in trace.segments:
-            # Use coordinate-based round-trip to hole ids (cheap, robust).
-            for hid, node in graph.nodes.items():
-                if (math.isclose(node.point.x, seg.start.x) and math.isclose(node.point.y, seg.start.y)) or \
-                   (math.isclose(node.point.x, seg.end.x) and math.isclose(node.point.y, seg.end.y)):
-                    forbidden.add((hid, hid, seg.layer))
+            start_hole = _hole_id_at(graph, seg.start)
+            end_hole = _hole_id_at(graph, seg.end)
+            if start_hole is not None and end_hole is not None:
+                forbidden.add((start_hole, end_hole, seg.layer))
     return forbidden
 
 
 def route(
     *,
+    board_id: str,
     placements: list[ComponentPlacement],
     components: list[Component],
     footprints: dict[str, ThroughHoleFootprint],
@@ -278,7 +279,7 @@ def route(
                 net_vias = cur_vias
                 break
             # Rip-up: forbid edges of the k highest-cost traces in this net
-            forbidden |= _ripup_forbidden(cur_traces, set(), DEFAULT_RIPUP_K)
+            forbidden |= _ripup_forbidden(cur_traces, graph, DEFAULT_RIPUP_K)
         else:
             net_succeeded = False
 
@@ -292,7 +293,7 @@ def route(
     return RouteResult(
         layout=TraceLayout(
             version=1,
-            board_id=graph.nodes[next(iter(graph.nodes))].id if False else "perfboard",
+            board_id=board_id,
             placements=placements,
             traces=traces,
             vias=vias,

@@ -162,7 +162,8 @@ class SolverJob(Base):
     __tablename__ = "solver_jobs"
     __table_args__ = (
         CheckConstraint(
-            "operation IN ('place','route','solve','optimize','validate','export','trace-route','trace-solve')",
+            "operation IN ('place','route','solve','optimize','validate','export',"
+            "'trace-route','trace-solve')",
             name="ck_solver_jobs_operation_allowed",
         ),
         CheckConstraint(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.domain.models import Trace, TraceLayout
 
-__all__ = ["trace_cost", "aggregate_cost"]
+__all__ = ["aggregate_cost", "trace_cost"]
 
 DEFAULT_TRACE_WEIGHTS: dict[str, float] = {
     "lengthMm": 1.0,

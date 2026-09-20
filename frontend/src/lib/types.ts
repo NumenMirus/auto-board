@@ -73,6 +73,34 @@ export interface BreadboardModel {
 }
 
 // ---------------------------------------------------------------------------
+// 4.7 Perfboard (soldered through-hole) — sibling of the breadboard model
+// ---------------------------------------------------------------------------
+
+export interface PerfboardMetadata {
+  rows: number;
+  cols: number;
+  layers: number;
+}
+
+export interface PerfboardModel {
+  id: string;
+  version: 1;
+  pitchMm: number;
+  rows: number;
+  cols: number;
+  layers: number;
+  holes: Hole[];
+  zones: BoardZone[];
+  metadata: PerfboardMetadata;
+}
+
+/** A board is either a breadboard or a perfboard; the discriminator lives
+ * on the `kind` field returned by `/board-models` (not on the model itself,
+ * since the two wire shapes differ structurally). */
+export type AnyBoardModel = BreadboardModel | PerfboardModel;
+export type BoardKind = 'breadboard' | 'perfboard';
+
+// ---------------------------------------------------------------------------
 // 4.3 Netlist
 // ---------------------------------------------------------------------------
 
@@ -208,6 +236,11 @@ export interface BreadboardFootprint {
   polarity: Record<string, string>;
 }
 
+/** Alias — the backend's `BreadboardFootprint` and `ThroughHoleFootprint`
+ * are the same Pydantic class (perfboard reuses the breadboard footprint
+ * shape verbatim, minus the rail/center-gap placement rules at runtime). */
+export type ThroughHoleFootprint = BreadboardFootprint;
+
 // ---------------------------------------------------------------------------
 // 4.5 Placement and jumpers
 // ---------------------------------------------------------------------------
@@ -253,6 +286,49 @@ export interface Layout {
   jumpers: Jumper[];
   manualElectricalLinks: ManualLink[];
 }
+
+// ---------------------------------------------------------------------------
+// 4.8 Perfboard trace routing — copper traces and vias
+// ---------------------------------------------------------------------------
+
+export type CopperLayer = 'top' | 'bottom';
+
+export interface TraceSegment {
+  start: Point;
+  end: Point;
+  layer: CopperLayer;
+  widthMm: number;
+}
+
+export interface Via {
+  point: Point;
+  diameterMm: number;
+  drillMm: number;
+}
+
+/** A soldered copper trace on a perfboard. Distinct from `SolverTrace`
+ * (the solver's placement/routing decision log) below. */
+export interface Trace {
+  id: string;
+  netId: string;
+  segments: TraceSegment[];
+  vias: Via[];
+  estimatedLengthMm: number;
+  widthMm: number;
+  locked: boolean;
+}
+
+/** Perfboard layout: placements + copper traces + vias. Sibling of `Layout`
+ * (which carries jumpers instead of traces for the breadboard case). */
+export interface TraceLayout {
+  version: 1;
+  boardId: string;
+  placements: ComponentPlacement[];
+  traces: Trace[];
+  vias: Via[];
+}
+
+export type AnyLayout = Layout | TraceLayout;
 
 // ---------------------------------------------------------------------------
 // 8.3 Diagnostics

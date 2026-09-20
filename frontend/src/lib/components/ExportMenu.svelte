@@ -2,16 +2,20 @@
   import { createExport, getExport, getExportDownloadUrl } from '$lib/api/client';
   import { ApiError } from '$lib/api/client';
   import type { ExportEnvelope, ExportFormat } from '$lib/api/client';
+  import type { BoardKind } from '$lib/types';
 
   type Props = {
     layoutId: string | null;
+    boardKind?: BoardKind;
   };
-  let { layoutId }: Props = $props();
+  let { layoutId, boardKind = 'breadboard' }: Props = $props();
 
-  // Human labels for the seven supported export formats. The id matches
+  // Human labels for the supported export formats, split by board family:
+  // breadboard layouts round-trip through jumpers-csv; perfboard layouts
+  // through the Gerber/drill/pick-and-place trio instead. The id matches
   // the backend's `ExportFormat` literal so `createExport(layoutId, id)`
   // passes through unchanged.
-  const FORMATS: Array<{ id: ExportFormat; label: string }> = [
+  const BREADBOARD_FORMATS: Array<{ id: ExportFormat; label: string }> = [
     { id: 'svg', label: 'SVG' },
     { id: 'png', label: 'PNG' },
     { id: 'pdf', label: 'PDF' },
@@ -20,6 +24,20 @@
     { id: 'jumpers-csv', label: 'Jumpers CSV' },
     { id: 'instructions-md', label: 'Istruzioni Markdown' }
   ];
+  const PERFBOARD_FORMATS: Array<{ id: ExportFormat; label: string }> = [
+    { id: 'svg', label: 'SVG' },
+    { id: 'png', label: 'PNG' },
+    { id: 'pdf', label: 'PDF' },
+    { id: 'json', label: 'Project JSON' },
+    { id: 'bom-csv', label: 'BOM CSV' },
+    { id: 'gerber-top', label: 'Gerber (top copper)' },
+    { id: 'gerber-bottom', label: 'Gerber (bottom copper)' },
+    { id: 'gerber-outline', label: 'Gerber (outline)' },
+    { id: 'drill', label: 'Drill (Excellon)' },
+    { id: 'placement-csv', label: 'Placement CSV' },
+    { id: 'instructions-md', label: 'Istruzioni Markdown' }
+  ];
+  const FORMATS = $derived(boardKind === 'perfboard' ? PERFBOARD_FORMATS : BREADBOARD_FORMATS);
 
   // Per-format export state. We track all in-flight / finished jobs so the
   // user can trigger every format in parallel without losing status.

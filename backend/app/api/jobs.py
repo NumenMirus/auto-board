@@ -40,7 +40,9 @@ __all__ = ["bp"]
 bp = Blueprint("jobs", url_prefix="/api/v1")
 
 
-_VALID_OPERATIONS: frozenset[str] = frozenset({"place", "route", "solve", "optimize", "validate", "export", "trace-route", "trace-solve"})
+_VALID_OPERATIONS: frozenset[str] = frozenset(
+    {"place", "route", "solve", "optimize", "validate", "export", "trace-route", "trace-solve"}
+)
 
 
 def _parse_uuid(raw: str) -> UUID:

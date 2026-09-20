@@ -22,15 +22,21 @@ import io
 import json
 from typing import TYPE_CHECKING
 
+from app.domain.excellon import render_excellon
 from app.domain.footprints.registry import FOOTPRINTS
+from app.domain.gerber import render_gerber
 from app.domain.index import BoardIndex
 from app.domain.instructions import AssemblyInstructions, build_instructions
+from app.domain.instructions_perfboard import build_instructions as build_perfboard_instructions
 from app.domain.models import (
     BreadboardModel,
     Component,
     Layout,
     Net,
+    PerfboardModel,
+    TraceLayout,
 )
+from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS
 from app.domain.render import render_svg
 
 if TYPE_CHECKING:
@@ -46,6 +52,12 @@ FORMAT_CONTENT_TYPES: dict[str, str] = {
     "bom-csv": "text/csv",
     "jumpers-csv": "text/csv",
     "instructions-md": "text/markdown",
+    # Perfboard-specific formats
+    "gerber-top": "application/x-gerber",
+    "gerber-bottom": "application/x-gerber",
+    "gerber-outline": "application/x-gerber",
+    "drill": "application/x-excellon",
+    "placement-csv": "text/csv",
 }
 
 
@@ -74,16 +86,18 @@ _INSTRUCTIONS_TITLE_FONT_SIZE_PX: float = 16.0
 
 async def render_export(
     format: str,
-    board: BreadboardModel,
+    board: BreadboardModel | PerfboardModel,
     components: list[Component],
     nets: list[Net],
-    layout: Layout,
+    layout: Layout | TraceLayout,
     project_name: str,
 ) -> tuple[bytes, str]:
     """Render an export artefact.
 
     ``format`` is one of the keys in :data:`FORMAT_CONTENT_TYPES`. Returns a
-    ``(bytes, content_type)`` tuple ready for S3 upload.
+    ``(bytes, content_type)`` tuple ready for S3 upload. ``board`` may be a
+    :class:`BreadboardModel` or a :class:`PerfboardModel`; perfboard-only
+    formats (``gerber-*``, ``drill``, ``placement-csv``) require the latter.
     """
     if format not in FORMAT_CONTENT_TYPES:
         raise ValueError(f"unknown export format: {format}")
@@ -99,11 +113,26 @@ async def render_export(
     if format == "bom-csv":
         return _render_bom_csv(components)
     if format == "jumpers-csv":
+        if not isinstance(layout, Layout):
+            raise ValueError("jumpers-csv export requires a breadboard Layout")
         return _render_jumpers_csv(layout, nets)
     if format == "instructions-md":
         return _render_instructions_md(board, components, nets, layout, project_name)
 
-    # Defensive: all 7 keys above are handled; the early-out for unknown keys already
+    # Perfboard-only formats below
+    if not isinstance(board, PerfboardModel):
+        raise ValueError(f"format {format!r} is only valid for perfboard boards")
+    if not isinstance(layout, TraceLayout):
+        raise ValueError(f"format {format!r} requires a TraceLayout")
+
+    if format in ("gerber-top", "gerber-bottom", "gerber-outline"):
+        return _render_gerber_part(board, components, layout, format)
+    if format == "drill":
+        return _render_drill(board, components, layout)
+    if format == "placement-csv":
+        return _render_placement_csv(board, components, layout)
+
+    # Defensive: all keys above are handled; the early-out for unknown keys already
     # raised. Kept for type-checkers that cannot narrow ``format``.
     raise ValueError(f"unknown export format: {format}")
 
@@ -123,37 +152,45 @@ def _build_index(board: BreadboardModel) -> BoardIndex:
 
 
 def _render_svg(
-    board: BreadboardModel,
+    board: BreadboardModel | PerfboardModel,
     components: list[Component],
     nets: list[Net],
-    layout: Layout,
+    layout: Layout | TraceLayout,
 ) -> tuple[bytes, str]:
-    index = _build_index(board)
-    svg_str = render_svg(board, index, FOOTPRINTS, components, nets, layout)
+    if isinstance(board, PerfboardModel):
+        if not isinstance(layout, TraceLayout):
+            raise ValueError("perfboard svg export requires a TraceLayout")
+        from app.domain.render_traces import render_traces as render_traces_svg
+
+        svg_str = render_traces_svg(board, components, PERFBOARD_FOOTPRINTS, layout)
+    else:
+        if not isinstance(layout, Layout):
+            raise ValueError("breadboard svg export requires a Layout")
+        index = _build_index(board)
+        svg_str = render_svg(board, index, FOOTPRINTS, components, nets, layout)
     return svg_str.encode("utf-8"), FORMAT_CONTENT_TYPES["svg"]
 
 
 def _render_png(
-    board: BreadboardModel,
+    board: BreadboardModel | PerfboardModel,
     components: list[Component],
     nets: list[Net],
-    layout: Layout,
+    layout: Layout | TraceLayout,
 ) -> tuple[bytes, str]:
     # cairosvg is imported lazily so the module is importable on machines without
     # the native libcairo (e.g. CI containers running only the SVG/JSON tests).
     import cairosvg  # type: ignore[import-untyped]
 
-    index = _build_index(board)
-    svg_str = render_svg(board, index, FOOTPRINTS, components, nets, layout)
-    png_bytes = cairosvg.svg2png(bytestring=svg_str.encode("utf-8"), scale=2)
+    svg_bytes, _ = _render_svg(board, components, nets, layout)
+    png_bytes = cairosvg.svg2png(bytestring=svg_bytes, scale=2)
     return png_bytes, FORMAT_CONTENT_TYPES["png"]
 
 
 def _render_pdf(
-    board: BreadboardModel,
+    board: BreadboardModel | PerfboardModel,
     components: list[Component],
     nets: list[Net],
-    layout: Layout,
+    layout: Layout | TraceLayout,
     project_name: str,
 ) -> tuple[bytes, str]:
     # SCOPE NOTE (milestone): a true multi-page PDF (layout page + instructions page)
@@ -166,18 +203,17 @@ def _render_pdf(
     # concatenate them — see the design notes in the milestone plan.
     import cairosvg
 
-    index = _build_index(board)
-    svg_str = render_svg(board, index, FOOTPRINTS, components, nets, layout)
-    pdf_bytes = cairosvg.svg2pdf(bytestring=svg_str.encode("utf-8"))
+    svg_bytes, _ = _render_svg(board, components, nets, layout)
+    pdf_bytes = cairosvg.svg2pdf(bytestring=svg_bytes)
     _ = project_name  # unused for the single-page layout-only PDF
     return pdf_bytes, FORMAT_CONTENT_TYPES["pdf"]
 
 
 def _render_json(
-    board: BreadboardModel,
+    board: BreadboardModel | PerfboardModel,
     components: list[Component],
     nets: list[Net],
-    layout: Layout,
+    layout: Layout | TraceLayout,
     project_name: str,
 ) -> tuple[bytes, str]:
     # Emit a self-describing export envelope. This is intentionally NOT a full
@@ -252,15 +288,23 @@ def _render_jumpers_csv(layout: Layout, nets: list[Net]) -> tuple[bytes, str]:
 
 
 def _render_instructions_md(
-    board: BreadboardModel,
+    board: BreadboardModel | PerfboardModel,
     components: list[Component],
     nets: list[Net],
-    layout: Layout,
+    layout: Layout | TraceLayout,
     project_name: str,
 ) -> tuple[bytes, str]:
-    index = _build_index(board)
-    instructions = build_instructions(board, index, FOOTPRINTS, components, nets, layout)
-    body = _render_instructions_markdown(instructions, project_name)
+    if isinstance(board, PerfboardModel):
+        if not isinstance(layout, TraceLayout):
+            raise ValueError("perfboard instructions-md export requires a TraceLayout")
+        perf_instructions = build_perfboard_instructions(board, components, nets, layout)
+        body = _render_perfboard_instructions_markdown(perf_instructions, project_name)
+    else:
+        if not isinstance(layout, Layout):
+            raise ValueError("breadboard instructions-md export requires a Layout")
+        index = _build_index(board)
+        instructions = build_instructions(board, index, FOOTPRINTS, components, nets, layout)
+        body = _render_instructions_markdown(instructions, project_name)
     return body.encode("utf-8"), FORMAT_CONTENT_TYPES["instructions-md"]
 
 
@@ -288,3 +332,99 @@ def _render_instructions_markdown(instructions: AssemblyInstructions, project_na
             lines.append(f"{step.order + 1}. {step.description}")
     lines.append("")
     return "\n".join(lines)
+
+
+def _render_perfboard_instructions_markdown(
+    instructions: object,
+    project_name: str,
+) -> str:
+    """Render a perfboard :class:`AssemblyInstructions` (title/steps/bom_lines)."""
+    lines: list[str] = []
+    lines.append(f"# {instructions.title}")  # type: ignore[attr-defined]
+    lines.append("")
+    lines.append(f"Progetto: {project_name}")
+    lines.append("")
+    lines.append("## Distinta componenti")
+    lines.append("")
+    for bom_line in instructions.bom_lines:  # type: ignore[attr-defined]
+        lines.append(f"- {bom_line}")
+    lines.append("")
+    lines.append("## Passi di montaggio")
+    lines.append("")
+    for i, step in enumerate(instructions.steps, start=1):  # type: ignore[attr-defined]
+        lines.append(f"{i}. {step}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_gerber_part(
+    board: PerfboardModel,
+    components: list[Component],
+    layout: TraceLayout,
+    format: str,
+) -> tuple[bytes, str]:
+    bundle = render_gerber(board, components, PERFBOARD_FOOTPRINTS, layout)
+    if format == "gerber-top":
+        body = bundle.top_copper
+    elif format == "gerber-bottom":
+        body = bundle.bottom_copper
+    else:
+        body = bundle.board_outline
+    return body.encode("utf-8"), FORMAT_CONTENT_TYPES[format]
+
+
+def _render_drill(
+    board: PerfboardModel,
+    components: list[Component],
+    layout: TraceLayout,
+) -> tuple[bytes, str]:
+    body = render_excellon(board, components, PERFBOARD_FOOTPRINTS, layout)
+    return body.encode("utf-8"), FORMAT_CONTENT_TYPES["drill"]
+
+
+_PLACEMENT_CSV_HEADERS: tuple[str, ...] = (
+    "ref",
+    "value",
+    "footprintId",
+    "xMm",
+    "yMm",
+    "rotationDeg",
+    "layer",
+)
+
+
+def _render_placement_csv(
+    board: PerfboardModel,
+    components: list[Component],
+    layout: TraceLayout,
+) -> tuple[bytes, str]:
+    """Pick-and-place CSV: one row per component, board-absolute mm position.
+
+    All perfboard components are placed on the top (component) side in the
+    current MVP — a dedicated bottom-side assembly flow is not modelled yet,
+    so ``layer`` is always ``"top"``.
+    """
+    comp_by_ref = {c.ref: c for c in components}
+    hole_by_id = {h.id: h for h in board.holes}
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_PLACEMENT_CSV_HEADERS)
+    for placement in sorted(layout.placements, key=lambda p: p.component_ref):
+        comp = comp_by_ref.get(placement.component_ref)
+        if comp is None:
+            continue
+        anchor = hole_by_id.get(placement.anchor_hole_id)
+        x_mm = anchor.point.x if anchor is not None else 0.0
+        y_mm = anchor.point.y if anchor is not None else 0.0
+        writer.writerow(
+            [
+                comp.ref,
+                comp.value or "",
+                comp.footprint_id,
+                f"{x_mm:.2f}",
+                f"{y_mm:.2f}",
+                str(placement.orientation),
+                "top",
+            ]
+        )
+    return buf.getvalue().encode("utf-8"), FORMAT_CONTENT_TYPES["placement-csv"]

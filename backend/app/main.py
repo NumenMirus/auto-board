@@ -58,14 +58,24 @@ from app.db.session import get_engine, get_session_factory
 from app.domain.boards.registry import BUILTIN_BOARDS
 from app.domain.footprints.registry import FOOTPRINTS
 from app.domain.index import BoardIndex
+from app.domain.models import BreadboardModel
 from app.settings import Settings, get_settings
 
 __all__ = ["create_app"]
 
 
 def _build_index_cache() -> dict[str, BoardIndex]:
-    """Pre-populate the index cache with every built-in board."""
-    return {board_id: BoardIndex.build(board) for board_id, board in BUILTIN_BOARDS.items()}
+    """Pre-populate the index cache with every built-in breadboard.
+
+    ``BoardIndex`` models breadboard-specific structure (electrical groups,
+    rail lattice, center-gap row split) that perfboards don't have — those
+    are indexed by the trace router's own ``MazeGraph`` instead.
+    """
+    return {
+        board_id: BoardIndex.build(board)
+        for board_id, board in BUILTIN_BOARDS.items()
+        if isinstance(board, BreadboardModel)
+    }
 
 
 def create_app() -> Sanic[Any, Any]:

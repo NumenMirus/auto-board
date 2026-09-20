@@ -33,7 +33,7 @@ def build_perfboard(
     *,
     id: str | None = None,
 ) -> PerfboardModel:
-    """Construct a ``rows × cols`` perfboard with the requested copper layer count.
+    """Construct a ``rows x cols`` perfboard with the requested copper layer count.
 
     The hole grid is laid out so row 1 is at the top (y = 0) and col 1 is at
     the left. ``layers`` is 1 (single-sided) or 2 (double-sided with plated

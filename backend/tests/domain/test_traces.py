@@ -27,7 +27,6 @@ from app.domain.traces.score import score_layout
 from app.domain.traces.solve import solve as solve_traces
 from app.domain.traces.validate import validate_layout
 
-
 pytest_plugins: list[str] = []
 
 
@@ -94,9 +93,27 @@ def test_maze_route_unknown_node_returns_none() -> None:
 def test_route_driver_produces_trace_for_two_terminal_net() -> None:
     g = maze.build_maze(rows=10, cols=10, pitch_mm=2.54, double_sided=True)
     placements = [_placement("R1", "2-2", {"1": "2-2", "2": "2-5"})]
-    components = [Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])]
-    nets = [Net(id="N1", name="SIG", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")], net_class="digital", priority=5, constraints=[])]
-    res = route_traces(placements=placements, components=components, footprints=PERFBOARD_FOOTPRINTS, nets=nets, graph=g)
+    components = [
+        Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])
+    ]
+    nets = [
+        Net(
+            id="N1",
+            name="SIG",
+            pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")],
+            net_class="digital",
+            priority=5,
+            constraints=[],
+        )
+    ]
+    res = route_traces(
+        board_id="test-board",
+        placements=placements,
+        components=components,
+        footprints=PERFBOARD_FOOTPRINTS,
+        nets=nets,
+        graph=g,
+    )
     assert res.unrouted_nets == []
     assert len(res.layout.traces) == 1
     assert res.layout.traces[0].net_id == "N1"
@@ -110,9 +127,27 @@ def test_route_driver_unrouted_terminal_for_single_pin_net() -> None:
     """
     g = maze.build_maze(rows=4, cols=4, pitch_mm=2.54, double_sided=False)
     placements = [_placement("R1", "1-1", {"1": "1-1"})]  # only one pin placed
-    components = [Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])]
-    nets = [Net(id="N1", name="SIG", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")], net_class="digital", priority=5, constraints=[])]
-    res = route_traces(placements=placements, components=components, footprints=PERFBOARD_FOOTPRINTS, nets=nets, graph=g)
+    components = [
+        Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])
+    ]
+    nets = [
+        Net(
+            id="N1",
+            name="SIG",
+            pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")],
+            net_class="digital",
+            priority=5,
+            constraints=[],
+        )
+    ]
+    res = route_traces(
+        board_id="test-board",
+        placements=placements,
+        components=components,
+        footprints=PERFBOARD_FOOTPRINTS,
+        nets=nets,
+        graph=g,
+    )
     assert "N1" in res.unrouted_nets
 
 
@@ -152,8 +187,19 @@ def test_validate_layout_emits_unrouted_terminal() -> None:
     board = get_board_model("strip-20x30-double")
     assert isinstance(board, PerfboardModel)
     placements = [_placement("R1", "2-2", {"1": "2-2", "2": "2-5"})]
-    components = [Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])]
-    nets = [Net(id="N1", name="SIG", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")], net_class="digital", priority=5, constraints=[])]
+    components = [
+        Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])
+    ]
+    nets = [
+        Net(
+            id="N1",
+            name="SIG",
+            pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")],
+            net_class="digital",
+            priority=5,
+            constraints=[],
+        )
+    ]
     # No traces routed → validator must emit UNROUTED_TERMINAL
     layout = TraceLayout(board_id=board.id, placements=placements)
     result = validate_layout(board, PERFBOARD_FOOTPRINTS, components, nets, layout)
@@ -164,8 +210,19 @@ def test_validate_layout_emits_unrouted_terminal() -> None:
 def test_validate_layout_no_diagnostics_on_clean_layout() -> None:
     board = get_board_model("strip-20x30-double")
     placements = [_placement("R1", "2-2", {"1": "2-2", "2": "2-5"})]
-    components = [Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])]
-    nets = [Net(id="N1", name="SIG", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")], net_class="digital", priority=5, constraints=[])]
+    components = [
+        Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])
+    ]
+    nets = [
+        Net(
+            id="N1",
+            name="SIG",
+            pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")],
+            net_class="digital",
+            priority=5,
+            constraints=[],
+        )
+    ]
     layout = TraceLayout(
         board_id=board.id,
         placements=placements,
@@ -198,10 +255,31 @@ def test_solve_pipeline_end_to_end() -> None:
         Component(ref="R2", value="4k7", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
     ]
     nets = [
-        Net(id="GND", name="GND", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R2", pin="2")], net_class="ground", priority=10, constraints=[]),
-        Net(id="SIG", name="SIG", pins=[PinRef(component_ref="R1", pin="2"), PinRef(component_ref="R2", pin="1")], net_class="digital", priority=5, constraints=[]),
+        Net(
+            id="GND",
+            name="GND",
+            pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R2", pin="2")],
+            net_class="ground",
+            priority=10,
+            constraints=[],
+        ),
+        Net(
+            id="SIG",
+            name="SIG",
+            pins=[PinRef(component_ref="R1", pin="2"), PinRef(component_ref="R2", pin="1")],
+            net_class="digital",
+            priority=5,
+            constraints=[],
+        ),
     ]
     initial_layout = TraceLayout(board_id=board.id, placements=placements)
-    res = solve_traces(board=board, footprints=PERFBOARD_FOOTPRINTS, components=components, nets=nets, options=SolverOptions(), initial_layout=initial_layout)
+    res = solve_traces(
+        board=board,
+        footprints=PERFBOARD_FOOTPRINTS,
+        components=components,
+        nets=nets,
+        options=SolverOptions(),
+        initial_layout=initial_layout,
+    )
     assert res.score.error_count == 0
     assert len(res.layout.traces) == 2

@@ -50,9 +50,16 @@ async def validate_layout_endpoint(request: Request) -> HTTPResponse:
         raise AppError("VALIDATION_ERROR", str(exc), status=422) from exc
 
     try:
-        board: BreadboardModel = get_board_model(payload.board.id)
+        board_model = get_board_model(payload.board.id)
     except InvalidInput as exc:
         raise AppError("UNKNOWN_BOARD_MODEL", str(exc), status=404) from exc
+    if not isinstance(board_model, BreadboardModel):
+        raise AppError(
+            "VALIDATION_ERROR",
+            f"board {payload.board.id!r} is a perfboard; use the trace-solve job operation instead",
+            status=422,
+        )
+    board: BreadboardModel = board_model
 
     index = BoardIndex.build(board)
     footprints_dict: dict[str, BreadboardFootprint] = dict(FOOTPRINTS)

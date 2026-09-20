@@ -83,9 +83,13 @@ async def run_export_job(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[s
         project_name = project_row.name
 
     try:
-        from app.domain.models import Layout
+        from app.domain.models import Layout, PerfboardModel, TraceLayout
 
-        layout_obj = Layout.model_validate(layout_dict)
+        layout_obj: Layout | TraceLayout = (
+            TraceLayout.model_validate(layout_dict)
+            if isinstance(board, PerfboardModel)
+            else Layout.model_validate(layout_dict)
+        )
 
         body, content_type = await export_service.render_export(
             fmt, board, components, nets, layout_obj, project_name
@@ -143,4 +147,9 @@ def _ext_for(fmt: str) -> str:
         "bom-csv": "csv",
         "jumpers-csv": "csv",
         "instructions-md": "md",
+        "gerber-top": "gtl",
+        "gerber-bottom": "gbl",
+        "gerber-outline": "gko",
+        "drill": "drl",
+        "placement-csv": "csv",
     }[fmt]

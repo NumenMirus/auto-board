@@ -50,6 +50,7 @@ __all__ = [
     "PerfboardMetadata",
     "PerfboardModel",
     "PinRef",
+    "PlacementResult",
     "PlacementRule",
     "PlacementRuleAllowedZones",
     "PlacementRuleBoardEdge",
@@ -57,7 +58,13 @@ __all__ = [
     "PlacementRuleMinClearance",
     "PlacementRuleStraddleCenterGap",
     "Point",
+    "PoseChoice",
+    "ProjectDocument",
+    "ProjectSettings",
     "RelativeHole",
+    "RouteRequest",
+    "RouteResult",
+    "ScoreRequest",
     "SolveRequest",
     "SolveRequestNetlist",
     "SolveResult",
@@ -66,16 +73,9 @@ __all__ = [
     "ThroughHoleFootprint",
     "Trace",
     "TraceLayout",
-    "TraceSegment",
-    "PlacementResult",
-    "PoseChoice",
-    "ProjectDocument",
-    "ProjectSettings",
-    "RouteRequest",
-    "RouteResult",
-    "ScoreRequest",
     "TraceRejection",
     "TraceRipup",
+    "TraceSegment",
     "ValidateRequest",
     "ValidationResult",
     "Via",
@@ -284,18 +284,6 @@ class FootprintGeometry(WireModel):
     nominal_body_width_mm: float | None = None
     nominal_body_length_mm: float | None = None
     flexible_lead_span: FlexibleLeadSpan | None = None
-
-
-class BreadboardFootprint(WireModel):
-    id: str
-    display_name: str
-    pin_offsets: dict[str, RelativeHole]
-    body_cells: list[RelativeHole]
-    supported_orientations: list[Orientation]
-    placement_rules: list[PlacementRule]
-    geometry: FootprintGeometry
-    internal_connections: list[list[str]] = Field(default_factory=list)
-    polarity: dict[str, str] = Field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
@@ -664,4 +652,3 @@ class TraceLayout(WireModel):
     placements: list[ComponentPlacement]
     traces: list[Trace] = Field(default_factory=list)
     vias: list[Via] = Field(default_factory=list)
-

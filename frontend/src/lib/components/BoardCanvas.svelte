@@ -3,13 +3,15 @@
   import HoleLayer from './HoleLayer.svelte';
   import ComponentLayer from './ComponentLayer.svelte';
   import JumperLayer from './JumperLayer.svelte';
+  import TraceLayer from './TraceLayer.svelte';
+  import ViaLayer from './ViaLayer.svelte';
   import { boardToSvg, type Point2D } from '../geometry';
-  import type { BreadboardModel, Layout } from '../types';
+  import type { AnyBoardModel, AnyLayout, PerfboardModel, TraceLayout } from '../types';
 
   // Props (Svelte 5 runes mode — NO legacy `export let`).
   type Props = {
-    board: BreadboardModel;
-    layout?: Layout | undefined;
+    board: AnyBoardModel;
+    layout?: AnyLayout | undefined;
     showLabels?: boolean;
     // Optional interactivity callbacks. All default to a no-op so existing
     // read-only callers (e.g. the SVG-export preview) can keep using this
@@ -19,15 +21,15 @@
     onPlacementMove?: ((componentRef: string, newAnchorHoleId: string) => void) | undefined;
     onRotate?: ((componentRef: string) => void) | undefined;
     onLockToggle?: ((componentRef: string) => void) | undefined;
-    onDelete?: ((kind: 'component' | 'jumper', id: string) => void) | undefined;
+    onDelete?: ((kind: 'component' | 'jumper' | 'trace', id: string) => void) | undefined;
     onJumperCreate?:
       | ((startHoleId: string, endHoleId: string) => void)
       | undefined;
-    onSelect?: ((kind: 'component' | 'jumper', id: string) => void) | undefined;
-    // The currently-selected entity id (component ref or jumper id). Drives
-    // stroke styling in the layers and the keyboard-shortcut handlers.
+    onSelect?: ((kind: 'component' | 'jumper' | 'trace', id: string) => void) | undefined;
+    // The currently-selected entity id (component ref or jumper/trace id).
+    // Drives stroke styling in the layers and the keyboard-shortcut handlers.
     selectedId?: string | null | undefined;
-    selectedKind?: ('component' | 'jumper' | null) | undefined;
+    selectedKind?: ('component' | 'jumper' | 'trace' | null) | undefined;
     // When true, the canvas routes click-to-create-jumper interactions:
     // the first click on a hole records the start, the second emits
     // `onJumperCreate(start, end)`. A second click on the same hole cancels.
@@ -244,12 +246,25 @@
   let rootEl: SVGSVGElement | null = $state(null);
 
   // ---- Render helpers -------------------------------------------------
+
+  // Discriminate PerfboardModel from BreadboardModel structurally: only the
+  // breadboard shape carries `electricalGroups` (tie-point/rail groups).
+  function isPerfboardModel(b: AnyBoardModel): b is PerfboardModel {
+    return !('electricalGroups' in b);
+  }
+  const isPerfboard = $derived(isPerfboardModel(board));
+
+  function isTraceLayout(l: AnyLayout): l is TraceLayout {
+    return 'traces' in l;
+  }
+
   const tiePointGroups = $derived(
-    board.electricalGroups.filter((g) => g.kind === 'tie-point')
+    isPerfboard ? [] : (board as Exclude<AnyBoardModel, PerfboardModel>).electricalGroups.filter((g) => g.kind === 'tie-point')
   );
 
   // Bounding box of a tie-point group's holes, padded by half a pitch so
-  // the shading "tucks under" the holes.
+  // the shading "tucks under" the holes. Breadboard-only — perfboard never
+  // populates `tiePointGroups` so this is never called for perfboard.
   function groupBounds(group: { holeIds: string[] }): {
     x: number;
     y: number;
@@ -283,6 +298,7 @@
 
   // Rail strip geometry: paint a thin rectangle behind each rail line,
   // coloured by the suffix (-plus => red, -minus => dark gray/black).
+  // Breadboard-only — perfboards have no rails.
   interface RailStrip {
     id: string;
     y: number;
@@ -292,8 +308,11 @@
   }
 
   const railStrips = $derived.by((): RailStrip[] => {
+    if (isPerfboard) return [];
     const out: RailStrip[] = [];
-    const railGroups = board.electricalGroups.filter((g) => g.kind === 'rail');
+    const railGroups = (board as Exclude<AnyBoardModel, PerfboardModel>).electricalGroups.filter(
+      (g) => g.kind === 'rail'
+    );
     const byId = new Map(board.holes.map((h) => [h.id, h]));
     for (const g of railGroups) {
       let minX = Number.POSITIVE_INFINITY;
@@ -319,16 +338,28 @@
     return out;
   });
 
-  // Hole labelling positions per the spec: columns 1,5,10,...,30 and
-  // rows a/j.
+  // Hole labelling positions. Breadboard: columns 1,5,10,...,30 and rows
+  // a/j (from board.metadata). Perfboard: every 5th column/row by number,
+  // since there's no named row convention (rows are just "1".."N").
   const labelColumns = $derived.by((): number[] => {
+    const totalCols = isPerfboard ? (board as PerfboardModel).cols : (board as { metadata: { columns: number } }).metadata.columns;
     const cols: number[] = [];
-    for (let c = 1; c <= board.metadata.columns; c += 1) {
+    for (let c = 1; c <= totalCols; c += 1) {
       if (c === 1 || c === 5 || c % 5 === 0) cols.push(c);
     }
     return cols;
   });
-  const labelRows = $derived(board.metadata.rows);
+  const labelRows = $derived.by((): string[] => {
+    if (isPerfboard) {
+      const totalRows = (board as PerfboardModel).rows;
+      const rows: string[] = [];
+      for (let r = 1; r <= totalRows; r += 1) {
+        if (r === 1 || r === 5 || r % 5 === 0) rows.push(String(r));
+      }
+      return rows;
+    }
+    return (board as { metadata: { rows: string[] } }).metadata.rows;
+  });
 
   function holeAtGrid(col: number, row: string) {
     return board.holes.find((h) => h.grid.col === col && h.grid.row === row);
@@ -358,43 +389,45 @@
   onclick={onCanvasClick}
   onwheel={onWheel}
   role="application"
-  aria-label="Breadboard editor canvas"
+  aria-label={isPerfboard ? 'Perfboard editor canvas' : 'Breadboard editor canvas'}
 >
-  <!-- Tie-point group shading -->
-  <g class="tie-point-shading" aria-hidden="true">
-    {#each tiePointGroups as group (group.id)}
-      {@const b = groupBounds(group)}
-      {#if b}
-        {@const tl = toSvgPx({ x: b.x, y: b.y })}
+  {#if !isPerfboard}
+    <!-- Tie-point group shading -->
+    <g class="tie-point-shading" aria-hidden="true">
+      {#each tiePointGroups as group (group.id)}
+        {@const b = groupBounds(group)}
+        {#if b}
+          {@const tl = toSvgPx({ x: b.x, y: b.y })}
+          <rect
+            x={tl.x}
+            y={tl.y}
+            width={b.w * SCALE}
+            height={b.h * SCALE}
+            rx="2"
+            ry="2"
+            fill="rgba(0, 0, 0, 0.04)"
+            stroke="rgba(0, 0, 0, 0.06)"
+            stroke-width="0.5"
+          />
+        {/if}
+      {/each}
+    </g>
+
+    <!-- Rail strips -->
+    <g class="rails" aria-hidden="true">
+      {#each railStrips as rail (rail.id)}
+        {@const tl = toSvgPx({ x: rail.x, y: rail.y })}
         <rect
           x={tl.x}
           y={tl.y}
-          width={b.w * SCALE}
-          height={b.h * SCALE}
-          rx="2"
-          ry="2"
-          fill="rgba(0, 0, 0, 0.04)"
-          stroke="rgba(0, 0, 0, 0.06)"
-          stroke-width="0.5"
+          width={rail.w * SCALE}
+          height={board.pitchMm * SCALE}
+          fill={rail.color === 'plus' ? 'var(--color-rail-plus)' : 'var(--color-rail-minus)'}
+          opacity="0.85"
         />
-      {/if}
-    {/each}
-  </g>
-
-  <!-- Rail strips -->
-  <g class="rails" aria-hidden="true">
-    {#each railStrips as rail (rail.id)}
-      {@const tl = toSvgPx({ x: rail.x, y: rail.y })}
-      <rect
-        x={tl.x}
-        y={tl.y}
-        width={rail.w * SCALE}
-        height={board.pitchMm * SCALE}
-        fill={rail.color === 'plus' ? 'var(--color-rail-plus)' : 'var(--color-rail-minus)'}
-        opacity="0.85"
-      />
-    {/each}
-  </g>
+      {/each}
+    </g>
+  {/if}
 
   <!-- Holes + labels -->
   <HoleLayer
@@ -409,15 +442,27 @@
     jumperToolActive={jumperToolActive}
   />
 
-  <!-- Jumpers (drawn under component bodies so they appear to go behind) -->
+  <!-- Jumpers (breadboard) or copper traces + vias (perfboard), drawn under
+       component bodies so they appear to go behind. -->
   {#if layout}
-    <JumperLayer
-      jumpers={layout.jumpers}
-      {SCALE}
-      toSvgPx={toSvgPx}
-      selectedId={selectedKind === 'jumper' ? selectedId : null}
-      {onSelect}
-    />
+    {#if isTraceLayout(layout)}
+      <ViaLayer vias={layout.vias} {SCALE} toSvgPx={toSvgPx} />
+      <TraceLayer
+        traces={layout.traces}
+        {SCALE}
+        toSvgPx={toSvgPx}
+        selectedId={selectedKind === 'trace' ? selectedId : null}
+        {onSelect}
+      />
+    {:else}
+      <JumperLayer
+        jumpers={layout.jumpers}
+        {SCALE}
+        toSvgPx={toSvgPx}
+        selectedId={selectedKind === 'jumper' ? selectedId : null}
+        {onSelect}
+      />
+    {/if}
   {/if}
 
   <!-- Placements -->

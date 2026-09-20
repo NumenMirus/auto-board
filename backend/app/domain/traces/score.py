@@ -6,7 +6,7 @@ frontend and API don't need to special-case the two board families.
 
 from __future__ import annotations
 
-from app.domain.models import ComponentPlacement, LayoutScore, TraceLayout
+from app.domain.models import ComponentPlacement, Diagnostic, LayoutScore, TraceLayout
 
 __all__ = ["score_layout"]
 
@@ -17,7 +17,7 @@ def score_layout(
     components_placed: int,
     components_total: int,
     layout: TraceLayout,
-    diagnostics: list | None = None,
+    diagnostics: list[Diagnostic] | None = None,
 ) -> LayoutScore:
     diagnostics = diagnostics or []
     error_count = sum(1 for d in diagnostics if d.severity == "error")

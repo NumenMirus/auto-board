@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { BreadboardModel, Hole } from '../types';
+  import type { AnyBoardModel, Hole } from '../types';
   import type { Point2D } from '../geometry';
 
   type Props = {
-    board: BreadboardModel;
+    board: AnyBoardModel;
     showLabels: boolean;
     SCALE: number;
     toSvgPx: (p: Point2D) => Point2D;

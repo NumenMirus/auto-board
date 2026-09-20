@@ -24,7 +24,8 @@
     LayoutScore,
     NetClass,
     Orientation,
-    ProjectDocument
+    ProjectDocument,
+    TraceLayout
   } from '$lib/types';
   import type { SolverOperation } from '$lib/api/client';
 
@@ -181,7 +182,12 @@
     projectStore.applyLayoutMutation(next);
   }
 
-  function deleteSelection(kind: 'component' | 'jumper', id: string): void {
+  function deleteSelection(kind: 'component' | 'jumper' | 'trace', id: string): void {
+    // This editor route only ever loads a breadboard Layout (perfboard
+    // projects use a read-only preview until the perfboard editor lands);
+    // a 'trace' selection can't occur here, but the callback signature must
+    // satisfy BoardCanvas's shared (breadboard | perfboard) prop contract.
+    if (kind === 'trace') return;
     const doc = projectStore.document;
     if (doc === null) return;
     const next: Layout =
@@ -289,10 +295,13 @@
   }
 
   function onApplySolverResult(result: {
-    layout: Layout;
+    layout: Layout | TraceLayout;
     score: LayoutScore;
     diagnostics: Diagnostic[];
   }): void {
+    // This route only ever solves a breadboard project's Layout (perfboard
+    // solves produce a TraceLayout, which this editor doesn't render yet).
+    if (!('jumpers' in result.layout)) return;
     projectStore.applyLayoutMutation(result.layout);
     projectStore.diagnostics = result.diagnostics;
     projectStore.score = result.score;
@@ -352,7 +361,11 @@
   // Selection plumbing. The BoardCanvas only reports intent; we own the
   // authoritative state.
   // ------------------------------------------------------------------------
-  function onSelect(kind: 'component' | 'jumper', id: string): void {
+  function onSelect(kind: 'component' | 'jumper' | 'trace', id: string): void {
+    // This route never renders a TraceLayout (see deleteSelection above),
+    // so 'trace' is unreachable here; it's only in the signature to match
+    // BoardCanvas's shared prop contract.
+    if (kind === 'trace') return;
     projectStore.setSelection({ kind, id });
   }
 
@@ -363,7 +376,7 @@
       ? projectStore.selection.id
       : null
   );
-  const canvasSelectionKind = $derived<'component' | 'jumper' | null>(
+  const canvasSelectionKind = $derived<'component' | 'jumper' | 'trace' | null>(
     projectStore.selection.kind === 'component' || projectStore.selection.kind === 'jumper'
       ? projectStore.selection.kind
       : null

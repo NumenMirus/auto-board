@@ -6,20 +6,22 @@ callable that mirrors :func:`app.domain.solve.solve` for the breadboard.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from app.domain.models import (
     Component,
     ComponentPlacement,
+    Diagnostic,
+    LayoutScore,
     Net,
     PerfboardModel,
     ProjectDocument,
     SolverOptions,
     SolverTrace,
+    ThroughHoleFootprint,
     TraceLayout,
 )
-from app.domain.perfboards.registry import ThroughHoleFootprint
 from app.domain.traces import maze
 from app.domain.traces import route as trace_route
 from app.domain.traces.score import score_layout
@@ -31,8 +33,8 @@ __all__ = ["SolveResult", "solve"]
 @dataclass(slots=True)
 class SolveResult:
     layout: TraceLayout
-    score: object  # LayoutScore — kept untyped to avoid an import cycle
-    diagnostics: list = field(default_factory=list)
+    score: LayoutScore
+    diagnostics: list[Diagnostic] = field(default_factory=list)
     trace: SolverTrace | None = None
 
 
@@ -40,8 +42,7 @@ def _initial_layout_from_document(
     doc: ProjectDocument,
 ) -> TraceLayout:
     placements = [
-        ComponentPlacement.model_validate(p.model_dump(by_alias=True))
-        for p in doc.layout.placements
+        ComponentPlacement.model_validate(p.model_dump(by_alias=True)) for p in doc.layout.placements
     ]
     return TraceLayout(board_id=doc.board.model_id, placements=placements)
 
@@ -79,6 +80,7 @@ def solve(
         double_sided=board.layers == 2,
     )
     route_result = trace_route.route(
+        board_id=board.id,
         placements=layout.placements,
         components=components,
         footprints=footprints,

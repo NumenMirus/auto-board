@@ -1,17 +1,15 @@
 <script lang="ts">
-  import type { BreadboardModel, ComponentPlacement } from '../types';
+  import type { AnyBoardModel, ComponentPlacement } from '../types';
   import type { Point2D } from '../geometry';
 
   type Props = {
-    board: BreadboardModel;
+    board: AnyBoardModel;
     placements: ComponentPlacement[];
     SCALE: number;
     toSvgPx: (p: Point2D) => Point2D;
     selectedId?: string | null;
-    onSelect?: ((kind: 'component' | 'jumper', id: string) => void) | undefined;
-    onPlacementMove?:
-      | ((componentRef: string, newAnchorHoleId: string) => void)
-      | undefined;
+    onSelect?: ((kind: 'component' | 'jumper' | 'trace', id: string) => void) | undefined;
+    onPlacementMove?: ((componentRef: string, newAnchorHoleId: string) => void) | undefined;
     // Provided by BoardCanvas so we can snap the ghost to the nearest hole
     // during a drag. Receives client (screen) coords.
     holeAt?: ((clientX: number, clientY: number) => string | null) | undefined;

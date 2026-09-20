@@ -20,7 +20,7 @@ from app.domain.boards.perfboard import build_perfboard
 from app.domain.errors import InvalidInput
 from app.domain.models import BreadboardModel, PerfboardModel
 
-__all__ = ["BUILTIN_BOARDS", "BUILTIN_PERFBOARDS", "get_board_model"]
+__all__ = ["BUILTIN_BOARDS", "BUILTIN_PERFBOARDS", "get_board_model", "is_perfboard_id"]
 
 
 @lru_cache(maxsize=1)
@@ -57,6 +57,13 @@ BUILTIN_BOARDS: dict[str, BreadboardModel | PerfboardModel] = {
     "strip-20x30-single": _perfboard_20x30_single(),
     "strip-20x30-double": _perfboard_20x30_double(),
     "strip-15x20-double": _perfboard_15x20_double(),
+}
+
+# Subset of BUILTIN_BOARDS containing only perfboard entries — convenient for
+# callers (e.g. seed script, board-listing UI) that want just this family
+# without re-checking isinstance on every entry.
+BUILTIN_PERFBOARDS: dict[str, PerfboardModel] = {
+    board_id: model for board_id, model in BUILTIN_BOARDS.items() if isinstance(model, PerfboardModel)
 }
 
 

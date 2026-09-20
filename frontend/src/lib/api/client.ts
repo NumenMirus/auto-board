@@ -145,8 +145,9 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 // ---------------------------------------------------------------------------
 
 import type {
+  AnyBoardModel,
+  BoardKind,
   BreadboardFootprint,
-  BreadboardModel,
   Layout,
   Net,
   ProjectDocument,
@@ -154,7 +155,8 @@ import type {
   Component,
   Diagnostic,
   LayoutScore,
-  SolverTrace
+  SolverTrace,
+  TraceLayout
 } from '../types';
 
 // ---- Wire shapes that aren't already in `types.ts` -------------------------
@@ -190,7 +192,9 @@ export type SolverOperation =
   | 'solve'
   | 'optimize'
   | 'validate'
-  | 'export';
+  | 'export'
+  | 'trace-route'
+  | 'trace-solve';
 
 export interface SolverOptions {
   seed?: number;
@@ -246,7 +250,7 @@ export interface JobEvent {
 }
 
 export interface JobResultEnvelope {
-  layout: Layout;
+  layout: Layout | TraceLayout;
   score: LayoutScore;
   diagnostics: Diagnostic[];
   trace?: SolverTrace | null;
@@ -255,7 +259,7 @@ export interface JobResultEnvelope {
 export interface LayoutEnvelope {
   id: string;
   projectId: string;
-  layout: Layout;
+  layout: Layout | TraceLayout;
   score: LayoutScore | null;
   diagnostics: Diagnostic[] | null;
   source: 'manual' | 'solver';
@@ -269,7 +273,12 @@ export type ExportFormat =
   | 'json'
   | 'bom-csv'
   | 'jumpers-csv'
-  | 'instructions-md';
+  | 'instructions-md'
+  | 'gerber-top'
+  | 'gerber-bottom'
+  | 'gerber-outline'
+  | 'drill'
+  | 'placement-csv';
 
 export interface ExportEnvelope {
   id: string;
@@ -289,7 +298,8 @@ export interface ExportEnvelope {
 export interface BoardModelSummary {
   id: string;
   version: number;
-  metadata: BreadboardModel['metadata'];
+  kind: BoardKind;
+  metadata: Record<string, unknown>;
 }
 
 export interface ValidateRequest {
@@ -374,12 +384,13 @@ export function listBoardModels(): Promise<BoardModelSummary[]> {
   return apiFetch<BoardModelSummary[]>('/board-models');
 }
 
-export function getBoardModel(id: string): Promise<BreadboardModel> {
-  return apiFetch<BreadboardModel>(`/board-models/${encodeURIComponent(id)}`);
+export function getBoardModel(id: string): Promise<AnyBoardModel & { kind: BoardKind }> {
+  return apiFetch<AnyBoardModel & { kind: BoardKind }>(`/board-models/${encodeURIComponent(id)}`);
 }
 
-export function listFootprints(): Promise<BreadboardFootprint[]> {
-  return apiFetch<BreadboardFootprint[]>('/footprints');
+export function listFootprints(kind?: BoardKind): Promise<BreadboardFootprint[]> {
+  const qs = kind !== undefined ? `?kind=${encodeURIComponent(kind)}` : '';
+  return apiFetch<BreadboardFootprint[]>(`/footprints${qs}`);
 }
 
 // ---- Validate (synchronous, in-process on the backend) --------------------

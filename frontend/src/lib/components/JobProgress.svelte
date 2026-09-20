@@ -3,12 +3,12 @@
   import { cancelJob, getJob, getJobResult } from '$lib/api/client';
   import { ApiError } from '$lib/api/client';
   import type { JobEnvelope } from '$lib/api/client';
-  import type { Diagnostic, Layout, LayoutScore } from '$lib/types';
+  import type { Diagnostic, Layout, LayoutScore, TraceLayout } from '$lib/types';
 
   type Props = {
     jobId: string | null;
     onApply: (result: {
-      layout: Layout;
+      layout: Layout | TraceLayout;
       score: LayoutScore;
       diagnostics: Diagnostic[];
     }) => void;
