@@ -10,37 +10,30 @@
   };
   let { layoutId, boardKind = 'breadboard' }: Props = $props();
 
-  // Human labels for the supported export formats, split by board family:
-  // breadboard layouts round-trip through jumpers-csv; perfboard layouts
-  // through the Gerber/drill/pick-and-place trio instead. The id matches
-  // the backend's `ExportFormat` literal so `createExport(layoutId, id)`
-  // passes through unchanged.
-  const BREADBOARD_FORMATS: Array<{ id: ExportFormat; label: string }> = [
-    { id: 'svg', label: 'SVG' },
-    { id: 'png', label: 'PNG' },
-    { id: 'pdf', label: 'PDF' },
-    { id: 'json', label: 'Project JSON' },
-    { id: 'bom-csv', label: 'BOM CSV' },
-    { id: 'jumpers-csv', label: 'Jumpers CSV' },
-    { id: 'instructions-md', label: 'Istruzioni Markdown' }
+  const BREADBOARD_FORMATS: Array<{ id: ExportFormat; label: string; group: 'image' | 'data' | 'doc' }> = [
+    { id: 'svg', label: 'SVG layout', group: 'image' },
+    { id: 'png', label: 'PNG render', group: 'image' },
+    { id: 'pdf', label: 'PDF guide', group: 'image' },
+    { id: 'json', label: 'Project JSON', group: 'data' },
+    { id: 'bom-csv', label: 'BOM (CSV)', group: 'data' },
+    { id: 'jumpers-csv', label: 'Wires (CSV)', group: 'data' },
+    { id: 'instructions-md', label: 'Build instructions', group: 'doc' }
   ];
-  const PERFBOARD_FORMATS: Array<{ id: ExportFormat; label: string }> = [
-    { id: 'svg', label: 'SVG' },
-    { id: 'png', label: 'PNG' },
-    { id: 'pdf', label: 'PDF' },
-    { id: 'json', label: 'Project JSON' },
-    { id: 'bom-csv', label: 'BOM CSV' },
-    { id: 'gerber-top', label: 'Gerber (top copper)' },
-    { id: 'gerber-bottom', label: 'Gerber (bottom copper)' },
-    { id: 'gerber-outline', label: 'Gerber (outline)' },
-    { id: 'drill', label: 'Drill (Excellon)' },
-    { id: 'placement-csv', label: 'Placement CSV' },
-    { id: 'instructions-md', label: 'Istruzioni Markdown' }
+  const PERFBOARD_FORMATS: Array<{ id: ExportFormat; label: string; group: 'image' | 'data' | 'doc' }> = [
+    { id: 'svg', label: 'SVG layout', group: 'image' },
+    { id: 'png', label: 'PNG render', group: 'image' },
+    { id: 'pdf', label: 'PDF guide', group: 'image' },
+    { id: 'json', label: 'Project JSON', group: 'data' },
+    { id: 'bom-csv', label: 'BOM (CSV)', group: 'data' },
+    { id: 'gerber-top', label: 'Gerber (top copper)', group: 'data' },
+    { id: 'gerber-bottom', label: 'Gerber (bottom copper)', group: 'data' },
+    { id: 'gerber-outline', label: 'Gerber (outline)', group: 'data' },
+    { id: 'drill', label: 'Drill (Excellon)', group: 'data' },
+    { id: 'placement-csv', label: 'Pick-and-place', group: 'data' },
+    { id: 'instructions-md', label: 'Build instructions', group: 'doc' }
   ];
   const FORMATS = $derived(boardKind === 'perfboard' ? PERFBOARD_FORMATS : BREADBOARD_FORMATS);
 
-  // Per-format export state. We track all in-flight / finished jobs so the
-  // user can trigger every format in parallel without losing status.
   let exportsByFormat = $state<Partial<Record<ExportFormat, ExportEnvelope>>>({});
   let pollHandles = $state<Partial<Record<ExportFormat, ReturnType<typeof setInterval>>>>({});
   let lastError = $state<string | null>(null);
@@ -86,63 +79,112 @@
       lastError = err instanceof ApiError ? err.message : 'Export failed.';
     }
   }
+
+  function groupLabel(group: 'image' | 'data' | 'doc'): string {
+    switch (group) {
+      case 'image':
+        return 'Image';
+      case 'data':
+        return 'Data';
+      case 'doc':
+        return 'Doc';
+    }
+  }
 </script>
 
 <section class="export-menu" aria-label="Export">
-  <header>
-    <h2>Export</h2>
-  </header>
   {#if layoutId === null}
-    <p class="empty">No layout yet</p>
+    <p class="empty">Run a Solve to enable export.</p>
   {:else}
-    <ul>
-      {#each FORMATS as fmt (fmt.id)}
-        {@const env = exportsByFormat[fmt.id]}
-        {@const inFlight = env?.status === 'pending' || env?.status === 'running'}
-        {@const url =
-          env !== undefined && env.status === 'succeeded'
-            ? getExportDownloadUrl(env.id)
-            : null}
-        <li>
-          <button
-            type="button"
-            disabled={inFlight}
-            onclick={() => void startExport(fmt.id)}
-          >
-            {fmt.label}
-          </button>
-          {#if env}
-            <span class={`status status-${env.status}`}>{env.status}</span>
-          {/if}
-          {#if url !== null}
-            <a class="download" href={url} download>Scarica</a>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+    <div class="hint">
+      Each format renders server-side; the build waits for the worker before the download link appears.
+    </div>
+    {#each ['image', 'data', 'doc'] as group (group)}
+      {@const items = FORMATS.filter((f) => f.group === group)}
+      {#if items.length > 0}
+        <div class="group">
+          <header class="group-head">
+            <span class="group-label">{groupLabel(group as 'image' | 'data' | 'doc')}</span>
+          </header>
+          <ul>
+            {#each items as fmt (fmt.id)}
+              {@const env = exportsByFormat[fmt.id]}
+              {@const isReady = env?.status === 'succeeded' && typeof env.id === 'string'}
+              {@const isPending = env?.status === 'pending' || env?.status === 'running'}
+              {@const isFailed = env?.status === 'failed'}
+              {@const url = isReady ? getExportDownloadUrl(env.id) : null}
+              <li>
+                <button
+                  type="button"
+                  class="export-btn"
+                  class:ready={isReady}
+                  class:pending={isPending}
+                  class:failed={isFailed}
+                  disabled={isPending}
+                  onclick={() => void startExport(fmt.id)}
+                  title={`Generate ${fmt.label}`}
+                >
+                  <span class="format-label">{fmt.label}</span>
+                  <span class="format-state mono">
+                    {#if isPending}rendering…
+                    {:else if isReady}ready
+                    {:else if isFailed}failed
+                    {:else}generate
+                    {/if}
+                  </span>
+                </button>
+                {#if url !== null}
+                  <a class="download-link" href={url} download>
+                    download
+                  </a>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
+    {/each}
   {/if}
   {#if lastError !== null}
-    <p class="error">{lastError}</p>
+    <p class="error mono">{lastError}</p>
   {/if}
 </section>
 
 <style>
   .export-menu {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    font-size: 13px;
+    padding: 0;
+    font-size: var(--fs-12);
   }
 
-  h2 {
+  .hint {
     margin: 0;
-    font-size: 14px;
+    padding: 0 var(--sp-3) var(--sp-3);
+    color: var(--ink-3);
+    font-size: var(--fs-11);
+    line-height: 1.4;
   }
 
   .empty {
-    color: var(--color-muted);
+    color: var(--ink-3);
     font-style: italic;
     margin: 0;
+    padding: var(--sp-3);
+  }
+
+  .group + .group {
+    margin-top: var(--sp-3);
+  }
+
+  .group-head {
+    padding: 0 var(--sp-3) 6px;
+  }
+
+  .group-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+    font-weight: 600;
   }
 
   ul {
@@ -151,51 +193,97 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
   }
 
   li {
     display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--paper-edge);
+  }
+
+  li:last-child {
+    border-bottom: none;
+  }
+
+  .export-btn {
+    flex: 1;
+    display: flex;
     align-items: center;
-    gap: var(--space-2);
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px var(--sp-3);
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: var(--ink-1);
+    text-align: left;
+    font-size: var(--fs-12);
+    cursor: pointer;
+    transition: background-color 120ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  button {
-    padding: 4px 10px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--color-border);
-    background: var(--color-bg);
+  .export-btn:hover:not(:disabled) {
+    background: var(--paper-2);
   }
 
-  button:hover:not(:disabled) {
-    background: var(--color-accent);
-    color: white;
-    border-color: var(--color-accent);
+  .export-btn:disabled {
+    cursor: default;
+    opacity: 0.85;
   }
 
-  .status {
-    font-size: 11px;
+  .export-btn.pending {
+    background: var(--accent-soft);
+  }
+
+  .export-btn.ready {
+    color: var(--ok);
+  }
+
+  .export-btn.failed {
+    color: var(--sev-error);
+    background: var(--sev-error-soft);
+  }
+
+  .format-label {
+    font-weight: 500;
+  }
+
+  .format-state {
+    font-size: 10px;
+    color: var(--ink-3);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
   }
 
-  .status-pending,
-  .status-running {
-    color: var(--color-warning);
+  .export-btn.pending .format-state {
+    color: var(--accent-1);
   }
-  .status-succeeded {
-    color: var(--color-info);
+  .export-btn.ready .format-state {
+    color: var(--ok);
   }
-  .status-failed {
-    color: var(--color-error);
+  .export-btn.failed .format-state {
+    color: var(--sev-error);
   }
 
-  .download {
-    font-size: 12px;
+  .download-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 12px;
+    color: var(--accent-1);
+    font-size: var(--fs-11);
+    font-weight: 500;
+    text-decoration: none;
+    border-left: 1px solid var(--paper-edge);
+  }
+
+  .download-link:hover {
+    background: var(--accent-soft);
+    text-decoration: none;
   }
 
   .error {
-    color: var(--color-error);
-    margin: 0;
+    color: var(--sev-error);
+    margin: var(--sp-2) var(--sp-3) 0;
+    font-size: var(--fs-11);
   }
 </style>

@@ -1,36 +1,28 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import type { JobEnvelope } from '$lib/api/client';
   import { cancelJob, getJob, getJobResult } from '$lib/api/client';
   import { ApiError } from '$lib/api/client';
-  import type { JobEnvelope } from '$lib/api/client';
-  import type { Diagnostic, Layout, LayoutScore, TraceLayout } from '$lib/types';
+  import type { Layout, LayoutScore, Diagnostic, TraceLayout } from '$lib/types';
 
   type Props = {
     jobId: string | null;
-    onApply: (result: {
-      layout: Layout | TraceLayout;
-      score: LayoutScore;
-      diagnostics: Diagnostic[];
-    }) => void;
-    // Optional: fires every poll cycle with the latest job envelope, so
-    // the parent page can keep its own snapshot (e.g. `resultLayoutId`)
-    // fresh for downstream UI like ExportMenu.
+    onApply?: ((result: { layout: Layout | TraceLayout; score: LayoutScore; diagnostics: Diagnostic[] }) => void) | undefined;
     onJobUpdate?: ((job: JobEnvelope) => void) | undefined;
   };
-  let { jobId, onApply, onJobUpdate = undefined }: Props = $props();
+  let { jobId, onApply = undefined, onJobUpdate = undefined }: Props = $props();
 
-  // Snapshot of the latest job we polled — the template reads from this
-  // instead of the global store so the same component can be embedded in
-  // panels, modals, etc. without coupling to projectStore.
   let status = $state<string | null>(null);
-  let percent = $state<number>(0);
+  let percent = $state(0);
   let phase = $state<string | null>(null);
   let errorMessage = $state<string | null>(null);
+  let finished = $state(false);
+  let showApply = $state(false);
+  let showCancel = $state(false);
+  let cancelledFlag = $state(false);
+  let applyError = $state<string | null>(null);
+  let applying = $state(false);
 
   let pollHandle: ReturnType<typeof setInterval> | null = null;
-  let cancelledFlag = $state(false);
-  let applying = $state(false);
-  let applyError = $state<string | null>(null);
 
   function stopPolling(): void {
     if (pollHandle !== null) {
@@ -39,52 +31,58 @@
     }
   }
 
-  async function tick(): Promise<void> {
-    if (jobId === null) return;
-    try {
-      const job = await getJob(jobId);
-      status = job.status;
-      percent = job.progressPercent;
-      phase = job.progressPhase;
-      errorMessage = job.errorMessage ?? null;
-      onJobUpdate?.(job);
-      if (
-        job.status === 'succeeded' ||
-        job.status === 'failed' ||
-        job.status === 'cancelled'
-      ) {
-        stopPolling();
-      }
-    } catch (err) {
-      status = 'failed';
-      errorMessage = err instanceof ApiError ? err.message : 'Polling failed.';
-      stopPolling();
-    }
-  }
-
   $effect(() => {
-    // Track the latest jobId; start/stop polling accordingly. The effect
-    // re-runs whenever jobId changes, so a fresh job kicks a new
-    // interval and the old one is cleaned up before this one starts.
-    stopPolling();
-    cancelledFlag = false;
-    applying = false;
-    applyError = null;
-    status = null;
-    percent = 0;
-    phase = null;
-    errorMessage = null;
-    if (jobId === null) return;
-    void tick();
-    pollHandle = setInterval(() => {
-      void tick();
-    }, 1000);
-    return () => {
+    if (jobId === null) {
+      status = null;
+      percent = 0;
+      phase = null;
+      errorMessage = null;
+      finished = false;
+      showApply = false;
+      showCancel = false;
+      cancelledFlag = false;
+      applyError = null;
+      applying = false;
       stopPolling();
-    };
-  });
+      return;
+    }
 
-  onDestroy(stopPolling);
+    stopPolling();
+    status = 'queued';
+    percent = 0;
+    phase = 'queued';
+    errorMessage = null;
+    finished = false;
+    showApply = false;
+    showCancel = true;
+    cancelledFlag = false;
+    applyError = null;
+
+    pollHandle = setInterval(() => {
+      void (async () => {
+        try {
+          const job = await getJob(jobId);
+          status = job.status;
+          percent = job.progressPercent;
+          phase = job.progressPhase;
+          if (typeof job.errorMessage === 'string' && job.errorMessage.length > 0) {
+            errorMessage = job.errorMessage;
+          }
+          finished = job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled';
+          showCancel = job.status === 'queued' || job.status === 'running';
+          showApply = job.status === 'succeeded' && typeof job.resultLayoutId === 'string';
+          onJobUpdate?.(job);
+          if (finished) {
+            stopPolling();
+          }
+        } catch (err) {
+          errorMessage = err instanceof ApiError ? err.message : 'Polling failed.';
+          finished = true;
+          stopPolling();
+        }
+      })();
+    }, 1000);
+  });
 
   async function onCancelClick(): Promise<void> {
     if (jobId === null) return;
@@ -93,6 +91,7 @@
       await cancelJob(jobId);
     } catch (err) {
       errorMessage = err instanceof ApiError ? err.message : 'Cancel failed.';
+      cancelledFlag = false;
     }
   }
 
@@ -102,140 +101,187 @@
     applyError = null;
     try {
       const result = await getJobResult(jobId);
-      onApply({
-        layout: result.layout,
+      onApply?.({
+        layout: result.layout as Layout | TraceLayout,
         score: result.score,
         diagnostics: result.diagnostics
       });
     } catch (err) {
-      applyError = err instanceof ApiError ? err.message : 'Failed to load result.';
+      applyError = err instanceof ApiError ? err.message : 'Could not fetch result.';
     } finally {
       applying = false;
     }
   }
-
-  const finished = $derived(
-    status === 'succeeded' || status === 'failed' || status === 'cancelled'
-  );
-  const showApply = $derived(status === 'succeeded');
-  const showCancel = $derived(status === 'queued' || status === 'running');
 </script>
 
 {#if jobId !== null}
-  <section class="job-progress" aria-label="Solver job progress">
-    <header class="header">
-      <span class="status status-{status ?? 'pending'}">{status ?? 'pending'}</span>
-      <span class="phase">{phase ?? ''}</span>
-    </header>
-    <div class="bar-track">
-      <div class="bar-fill" style:width="{Math.max(0, Math.min(100, percent))}%"></div>
+  <section class="job-progress" data-status={status} aria-label="Solver job progress">
+    <div class="track">
+      <div class="track-fill" style:width="{Math.max(0, Math.min(100, percent))}%"></div>
     </div>
-    <div class="meta">{percent}%</div>
+
+    <div class="meta">
+      <span class="status-chip mono" data-status={status}>
+        <span class="chip-dot" aria-hidden="true"></span>
+        {status ?? 'queued'}
+      </span>
+      <span class="phase mono">{phase ?? ''}</span>
+      <span class="pct mono">{percent}%</span>
+
+      <span class="actions">
+        {#if showCancel}
+          <button type="button" class="action" onclick={onCancelClick} disabled={cancelledFlag}>
+            {cancelledFlag ? 'Cancelling…' : 'Cancel'}
+          </button>
+        {/if}
+        {#if showApply}
+          <button type="button" class="action primary" onclick={onApplyClick} disabled={applying}>
+            {applying ? 'Applying…' : 'Apply to draft'}
+          </button>
+        {/if}
+      </span>
+    </div>
+
     {#if errorMessage !== null}
-      <p class="error">{errorMessage}</p>
+      <p class="message error mono">{errorMessage}</p>
     {/if}
     {#if applyError !== null}
-      <p class="error">{applyError}</p>
+      <p class="message error mono">{applyError}</p>
     {/if}
-    <div class="actions">
-      {#if showCancel}
-        <button type="button" onclick={onCancelClick} disabled={cancelledFlag}>
-          Cancel
-        </button>
-      {/if}
-      {#if showApply}
-        <button type="button" onclick={onApplyClick} disabled={applying}>
-          {applying ? 'Applying…' : 'Apply to draft'}
-        </button>
-      {/if}
-    </div>
-    {#if finished && !showApply && !showCancel}
-      <p class="hint">Job finished. Pick another action.</p>
+    {#if finished && !showApply && !showCancel && errorMessage === null}
+      <p class="message hint">Job finished. Pick another action.</p>
     {/if}
   </section>
 {/if}
 
 <style>
   .job-progress {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-2);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    font-size: 13px;
+    padding: 0 18px 0;
+    background: var(--paper-1);
+    border-bottom: 1px solid var(--paper-edge);
   }
 
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-  }
-
-  .status {
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 11px;
-    letter-spacing: 0.04em;
-  }
-
-  .status-succeeded {
-    color: var(--color-info);
-  }
-  .status-failed,
-  .status-cancelled {
-    color: var(--color-error);
-  }
-  .status-running,
-  .status-queued {
-    color: var(--color-warning);
-  }
-
-  .bar-track {
-    height: 8px;
-    background: var(--color-border);
-    border-radius: var(--radius-sm);
+  .track {
+    position: relative;
+    height: 2px;
+    background: var(--paper-3);
+    border-radius: 0;
     overflow: hidden;
   }
 
-  .bar-fill {
+  .track-fill {
     height: 100%;
-    background: var(--color-accent);
-    transition: width 200ms linear;
+    background: var(--accent-1);
+    transition: width 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .job-progress[data-status='failed'] .track-fill {
+    background: var(--sev-error);
+  }
+  .job-progress[data-status='cancelled'] .track-fill {
+    background: var(--ink-3);
+  }
+  .job-progress[data-status='succeeded'] .track-fill {
+    background: var(--ok);
   }
 
   .meta {
-    color: var(--color-muted);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: 6px 0;
+    font-size: var(--fs-12);
+  }
+
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--paper-edge);
+    background: var(--paper-2);
+    color: var(--ink-2);
+    font-size: var(--fs-11);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .status-chip[data-status='queued'] {
+    color: var(--ink-2);
+  }
+  .status-chip[data-status='running'] {
+    color: var(--accent-1);
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+  }
+  .status-chip[data-status='succeeded'] {
+    color: var(--ok);
+    background: var(--ok-soft);
+    border-color: rgba(42, 110, 63, 0.3);
+  }
+  .status-chip[data-status='failed'] {
+    color: var(--sev-error);
+    background: var(--sev-error-soft);
+    border-color: var(--sev-error-line);
+  }
+  .status-chip[data-status='cancelled'] {
+    color: var(--ink-3);
+    background: var(--paper-2);
+    border-color: var(--paper-edge);
+  }
+
+  .chip-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
+  }
+
+  .phase {
+    color: var(--ink-3);
+    font-size: var(--fs-11);
+  }
+
+  .pct {
+    color: var(--ink-2);
+    font-weight: 500;
     font-variant-numeric: tabular-nums;
   }
 
-  .error {
-    color: var(--color-error);
-    margin: 0;
-  }
-
-  .hint {
-    color: var(--color-muted);
-    margin: 0;
-    font-style: italic;
-  }
-
   .actions {
-    display: flex;
-    gap: var(--space-2);
+    margin-left: auto;
+    display: inline-flex;
+    gap: 6px;
   }
 
-  button {
+  .action {
     padding: 4px 10px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--color-border);
-    background: var(--color-bg);
+    font-size: var(--fs-12);
   }
 
-  button:hover:not(:disabled) {
-    background: var(--color-accent);
-    color: white;
-    border-color: var(--color-accent);
+  .action.primary {
+    background: var(--accent-1);
+    border-color: var(--accent-1);
+    color: #fff;
+  }
+
+  .action.primary:hover:not(:disabled) {
+    background: var(--accent-3);
+    border-color: var(--accent-3);
+  }
+
+  .message {
+    margin: 0 0 6px;
+    font-size: var(--fs-11);
+  }
+
+  .message.error {
+    color: var(--sev-error);
+  }
+
+  .message.hint {
+    color: var(--ink-3);
   }
 </style>

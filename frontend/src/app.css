@@ -1,25 +1,137 @@
+/* =============================================================================
+   AutoBoard — design tokens & global primitives
+   Register: Workshop Bench (paper surface, instrument-panel chrome, regulated
+   wire colors, monospace ref/pin labels).
+   -----------------------------------------------------------------------------
+   This file is the only place color tokens are declared. Components must
+   reference these via var(--…) — never hardcode hex.
+   ============================================================================= */
+
 :root {
-  --color-bg: #ffffff;
-  --color-fg: #1a1a1a;
-  --color-muted: #6b7280;
-  --color-border: #e5e7eb;
-  --color-surface: #f9fafb;
-  --color-accent: #1f6feb;
-  --color-error: #d92b2b;
-  --color-warning: #d97706;
-  --color-info: #2563eb;
-  --color-rail-plus: #d92b2b;
-  --color-rail-minus: #1a1a1a;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
+  /* -------------------------------------------------------------------------
+     Color tokens (OKLCH where it matters for perceptual uniformity)
+     ------------------------------------------------------------------------- */
+  /* Surface — warm paper. Not cream-flour. Anchored on graphite so type
+     inks into it without a tint shift toward "warm AI neutral". */
+  --paper-0: #ffffff;            /* canvas (full white for paper edge) */
+  --paper-1: #faf8f3;            /* page bg (subtle warm white) */
+  --paper-2: #f3efe6;            /* surface (raised panels) */
+  --paper-3: #e9e3d4;            /* sunken panels (sidebar bg) */
+  --paper-4: #ddd4be;            /* dividers, dense grids */
+  --paper-edge: #c9c0a8;         /* hairline borders */
+
+  /* Ink — graphite, not pure black, so it warms slightly on paper. */
+  --ink-1: #181715;              /* primary text, headings */
+  --ink-2: #34312b;              /* secondary text */
+  --ink-3: #6a665d;              /* tertiary text, labels, helper */
+  --ink-4: #9a9384;              /* disabled, placeholder */
+
+  /* Accent — technical blue. Used for: primary actions, selected state,
+     focus ring, selected net glow. Saturation chosen so it reads on both
+     paper and ink without glowing neon. */
+  --accent-1: #0b4dff;           /* primary */
+  --accent-2: #0a3fc7;           /* pressed */
+  --accent-3: #2e6dff;           /* hover */
+  --accent-soft: rgba(11, 77, 255, 0.10);
+  --accent-line: rgba(11, 77, 255, 0.32);
+  --accent-glow: rgba(11, 77, 255, 0.22);
+
+  /* Signal — the wire colors the bench actually uses. Red = +V, near-black
+     = GND. They are reserved for electrical semantics and must never be
+     used for decorative UI chrome. */
+  --wire-vcc: #d6332b;           /* regulated red, NOT danger red */
+  --wire-vcc-soft: rgba(214, 51, 43, 0.10);
+  --wire-gnd: #1a1a1a;           /* near-black */
+  --wire-gnd-soft: rgba(26, 26, 26, 0.08);
+
+  /* Diagnostic palette — three severities, bench-instrument tones. */
+  --sev-error: #b3261e;          /* dial red */
+  --sev-error-soft: #fbeae8;
+  --sev-error-line: #e9b3ad;
+  --sev-warning: #9a6100;        /* amber, not orange */
+  --sev-warning-soft: #fbf2dd;
+  --sev-warning-line: #e9cf94;
+  --sev-info: #1f4f86;           /* instrument blue, distinct from accent */
+  --sev-info-soft: #e7eef7;
+  --sev-info-line: #b8cce3;
+
+  /* OK (success). Used only when the validator finishes and reports zero
+     errors — kept as a single tone so it doesn't bleed into the chrome. */
+  --ok: #2a6e3f;
+  --ok-soft: #e8f1eb;
+
+  /* -------------------------------------------------------------------------
+     Type
+     ------------------------------------------------------------------------- */
   --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Product register scale (1.125 between steps). 12 is the body floor. */
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-17: 17px;
+  --fs-20: 20px;
+  --fs-24: 24px;
+  --fs-32: 32px;
+
+  /* -------------------------------------------------------------------------
+     Spacing — 4 px scale.
+     ------------------------------------------------------------------------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* -------------------------------------------------------------------------
+     Radii
+     ------------------------------------------------------------------------- */
+  --r-1: 2px;     /* hairline */
+  --r-2: 4px;     /* buttons */
+  --r-3: 6px;     /* cards, panels */
+  --r-4: 8px;     /* modal */
+  --r-pill: 999px;
+
+  /* -------------------------------------------------------------------------
+     Elevation — subtle. Workshop doesn't use soft drop shadows.
+     ------------------------------------------------------------------------- */
+  --sh-1: 0 1px 0 rgba(24, 23, 21, 0.06);          /* panel edge */
+  --sh-2: 0 1px 0 rgba(24, 23, 21, 0.08), 0 4px 12px rgba(24, 23, 21, 0.05); /* popover */
+  --sh-focus: 0 0 0 2px var(--accent-soft), 0 0 0 3px var(--accent-1);
+
+  /* -------------------------------------------------------------------------
+     Motion
+     ------------------------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);  /* gentle ease-out */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 280ms;
+
+  /* -------------------------------------------------------------------------
+     Z-index scale (semantic)
+     ------------------------------------------------------------------------- */
+  --z-base: 0;
+  --z-sticky: 50;
+  --z-dropdown: 100;
+  --z-overlay: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+  --z-tooltip: 500;
 }
+
+/* =============================================================================
+   Reset & base
+   ============================================================================= */
 
 *,
 *::before,
@@ -33,9 +145,36 @@ body {
   padding: 0;
   height: 100%;
   font-family: var(--font-sans);
-  color: var(--color-fg);
-  background: var(--color-bg);
+  font-size: var(--fs-14);
+  color: var(--ink-1);
+  background: var(--paper-1);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv11', 'ss01', 'ss03'; /* Inter stylistic alternates */
+}
+
+body {
+  /* Subtle paper grain — single horizontal hairlines every 12 px. Reads as
+     draft paper; never as decoration. */
+  background-image:
+    linear-gradient(to bottom, rgba(24, 23, 21, 0.012) 1px, transparent 1px);
+  background-size: 100% 12px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5 {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.005em;
+}
+
+p {
+  margin: 0;
+  line-height: 1.5;
 }
 
 button {
@@ -44,21 +183,178 @@ button {
 }
 
 a {
-  color: var(--color-accent);
+  color: var(--accent-1);
   text-decoration: none;
 }
 
 a:hover {
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 input,
 textarea,
 select {
   font: inherit;
+  color: inherit;
 }
 
 code,
-pre {
+pre,
+.mono,
+kbd {
   font-family: var(--font-mono);
+  font-size: 0.92em;
+  font-feature-settings: 'zero', 'ss02';
+}
+
+/* Visually hidden helper */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Focus ring — keyboard only. Mouse clicks leave the existing focus state
+   in place without a visible ring, because re-drawing it on every click is
+   noise on a dense editor. */
+:focus-visible {
+  outline: 2px solid var(--accent-1);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+
+/* =============================================================================
+   Primitives
+   ============================================================================= */
+
+/* Form controls */
+input[type='text'],
+input[type='number'],
+input[type='search'],
+textarea,
+select {
+  padding: 6px 10px;
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--r-2);
+  background: var(--paper-0);
+  color: var(--ink-1);
+  font-size: var(--fs-14);
+  transition: border-color var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+}
+
+input[type='text']:hover,
+input[type='number']:hover,
+textarea:hover,
+select:hover {
+  border-color: var(--ink-3);
+}
+
+input[type='text']:focus,
+input[type='number']:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent-1);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+input[type='number'] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Default button */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--paper-edge);
+  background: var(--paper-0);
+  color: var(--ink-1);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  line-height: 1.2;
+  transition:
+    background-color var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out),
+    color var(--dur) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+button:hover:not(:disabled) {
+  background: var(--paper-2);
+  border-color: var(--ink-3);
+}
+
+button:active:not(:disabled) {
+  background: var(--paper-3);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Primary action button — used sparingly, never for tertiary actions. */
+button.primary {
+  background: var(--accent-1);
+  border-color: var(--accent-1);
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-3);
+  border-color: var(--accent-3);
+}
+
+button.primary:active:not(:disabled) {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
+
+/* =============================================================================
+   Scrollbar — minimal, instrument-panel feel.
+   ============================================================================= */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--paper-edge) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--paper-edge);
+  border-radius: var(--r-pill);
+  border: 2px solid var(--paper-1);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
 }

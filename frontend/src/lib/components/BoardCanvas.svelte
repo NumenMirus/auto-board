@@ -8,16 +8,10 @@
   import { boardToSvg, type Point2D } from '../geometry';
   import type { AnyBoardModel, AnyLayout, PerfboardModel, TraceLayout } from '../types';
 
-  // Props (Svelte 5 runes mode — NO legacy `export let`).
   type Props = {
     board: AnyBoardModel;
     layout?: AnyLayout | undefined;
     showLabels?: boolean;
-    // Optional interactivity callbacks. All default to a no-op so existing
-    // read-only callers (e.g. the SVG-export preview) can keep using this
-    // component unchanged. The canvas NEVER mutates layout state itself;
-    // it only emits intents. The parent page wires the callbacks to
-    // `projectStore.applyLayoutMutation` (and a debounced validate call).
     onPlacementMove?: ((componentRef: string, newAnchorHoleId: string) => void) | undefined;
     onRotate?: ((componentRef: string) => void) | undefined;
     onLockToggle?: ((componentRef: string) => void) | undefined;
@@ -26,16 +20,9 @@
       | ((startHoleId: string, endHoleId: string) => void)
       | undefined;
     onSelect?: ((kind: 'component' | 'jumper' | 'trace', id: string) => void) | undefined;
-    // The currently-selected entity id (component ref or jumper/trace id).
-    // Drives stroke styling in the layers and the keyboard-shortcut handlers.
     selectedId?: string | null | undefined;
     selectedKind?: ('component' | 'jumper' | 'trace' | null) | undefined;
-    // When true, the canvas routes click-to-create-jumper interactions:
-    // the first click on a hole records the start, the second emits
-    // `onJumperCreate(start, end)`. A second click on the same hole cancels.
     jumperToolActive?: boolean | undefined;
-    // The id of the hole currently being eyed as the first endpoint of a
-    // pending jumper — drawn as a ring by HoleLayer.
     jumperStartHoleId?: string | null | undefined;
   };
   let {
@@ -54,22 +41,13 @@
     jumperStartHoleId = null
   }: Props = $props();
 
-  // First endpoint of a pending jumper (jumper tool: first hole clicked).
-  // Lives at the canvas scope so HoleLayer / onPointerDown / onKeydown
-  // can share it. Synced from the prop on every change so a parent that
-  // controls it externally (e.g. an "esc to cancel" toolbar button) wins.
   let pendingStart = $state<string | null>(untrack(() => jumperStartHoleId));
   $effect(() => {
     pendingStart = jumperStartHoleId;
   });
 
-  // Tunable scale (SVG units per millimetre). 4.0 matches the backend's
-  // default RenderOptions.width_scale, so visual coordinates are 1:1 with
-  // the SVG export.
   const SCALE = 4;
 
-  // Derive an initial viewBox from the board extent. We add a small margin
-  // so rails (which extend below y=0 in board space) are visible.
   const boardExtent = $derived.by(() => {
     let minX = 0;
     let minY = -15;
@@ -88,15 +66,11 @@
     return { minX, minY, maxX, maxY };
   });
 
-  // Pan/zoom viewBox state. Stored in board-mm space so transforms are
-  // straightforward; the SVG re-maps to pixel space via the `SCALE` constant.
   let viewX = $state(0);
   let viewY = $state(0);
   let viewW = $state(80);
   let viewH = $state(60);
 
-  // Snap viewBox to the board on first render so the user doesn't see an
-  // empty canvas. `effect.pre` ensures it runs before children render.
   $effect.pre(() => {
     viewX = boardExtent.minX - 2;
     viewY = boardExtent.minY - 2;
@@ -106,8 +80,6 @@
 
   const viewBoxAttr = $derived(`${viewX} ${viewY} ${viewW} ${viewH}`);
 
-  // Transform a point in board-mm space to SVG pixel space (used by
-  // pointer-event handlers that work in client coords).
   function toSvgPx(p: Point2D): Point2D {
     return boardToSvg(p, SCALE);
   }
@@ -128,7 +100,6 @@
     const dx = event.clientX - panStart.x;
     const dy = event.clientY - panStart.y;
     const svg = event.currentTarget as SVGSVGElement;
-    // Pan in the SVG's local space: convert screen px to world units.
     const worldDx = (dx * viewW) / svg.clientWidth;
     const worldDy = (dy * viewH) / svg.clientHeight;
     viewX = panStart.vx - worldDx;
@@ -141,22 +112,14 @@
     (event.currentTarget as Element).releasePointerCapture?.(event.pointerId);
   }
 
-  // ---- Jumper tool: click two holes to make a wire --------------------
-  // The SVG itself catches hole clicks via HoleLayer's stopPropagation, so
-  // a click on empty canvas space never reaches the jumper-tool state
-  // machine. That keeps the tool predictable: only deliberate hole picks
-  // count.
   function onCanvasClick(event: MouseEvent): void {
     if (!jumperToolActive) return;
     const target = event.target as Element | null;
-    // Hole clicks carry `data-hole-id`; everything else (rails, shading,
-    // jumpers, components) is ignored here.
     const holeId = target?.getAttribute?.('data-hole-id');
     if (holeId === null || holeId === undefined || holeId === '') return;
     if (pendingStart === null) {
       pendingStart = holeId;
     } else if (pendingStart === holeId) {
-      // Clicked the same hole twice -> cancel.
       pendingStart = null;
     } else {
       onJumperCreate?.(pendingStart, holeId);
@@ -164,14 +127,8 @@
     }
   }
 
-  // ---- Keyboard shortcuts ---------------------------------------------
-  // 'r' rotates the selected component, 'l' toggles its lock, Delete/
-  // Backspace removes the selection. Shortcuts fire only when the canvas
-  // (not a child input) has focus. We attach/detach via $effect so the
-  // listener is removed when the canvas unmounts.
   $effect(() => {
     function handler(event: KeyboardEvent): void {
-      // Don't intercept typing inside form fields.
       const t = event.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
         return;
@@ -211,11 +168,6 @@
     viewY = worldY - (pxY / rect.height) * viewH;
   }
 
-  // ---- holeAt (snapping) ----------------------------------------------
-  // Plain <script> function (not a $state rune); exposed via Svelte's
-  // component instance export. Caller passes clientX/clientY; we return
-  // the nearest enabled hole id within a 2.5 mm radius of the snapped
-  // world point, else null.
   export function holeAt(clientX: number, clientY: number): string | null {
     const svg = rootEl;
     if (!svg) return null;
@@ -245,10 +197,6 @@
 
   let rootEl: SVGSVGElement | null = $state(null);
 
-  // ---- Render helpers -------------------------------------------------
-
-  // Discriminate PerfboardModel from BreadboardModel structurally: only the
-  // breadboard shape carries `electricalGroups` (tie-point/rail groups).
   function isPerfboardModel(b: AnyBoardModel): b is PerfboardModel {
     return !('electricalGroups' in b);
   }
@@ -262,9 +210,6 @@
     isPerfboard ? [] : (board as Exclude<AnyBoardModel, PerfboardModel>).electricalGroups.filter((g) => g.kind === 'tie-point')
   );
 
-  // Bounding box of a tie-point group's holes, padded by half a pitch so
-  // the shading "tucks under" the holes. Breadboard-only — perfboard never
-  // populates `tiePointGroups` so this is never called for perfboard.
   function groupBounds(group: { holeIds: string[] }): {
     x: number;
     y: number;
@@ -296,15 +241,13 @@
     };
   }
 
-  // Rail strip geometry: paint a thin rectangle behind each rail line,
-  // coloured by the suffix (-plus => red, -minus => dark gray/black).
-  // Breadboard-only — perfboards have no rails.
   interface RailStrip {
     id: string;
     y: number;
     x: number;
     w: number;
     color: 'plus' | 'minus';
+    label: string;
   }
 
   const railStrips = $derived.by((): RailStrip[] => {
@@ -327,20 +270,21 @@
       }
       if (!Number.isFinite(minX)) continue;
       const isPlus = g.id.includes('-plus-');
+      // Strip identifier carries its polarity in the name. Strip any rail-
+      // internal group suffix so the label prints "top-plus" / "bottom-minus".
+      const label = isPlus ? '+' : '−';
       out.push({
         id: g.id,
         y: y - board.pitchMm / 2,
         x: minX - board.pitchMm / 2,
         w: maxX - minX + board.pitchMm,
-        color: isPlus ? 'plus' : 'minus'
+        color: isPlus ? 'plus' : 'minus',
+        label
       });
     }
     return out;
   });
 
-  // Hole labelling positions. Breadboard: columns 1,5,10,...,30 and rows
-  // a/j (from board.metadata). Perfboard: every 5th column/row by number,
-  // since there's no named row convention (rows are just "1".."N").
   const labelColumns = $derived.by((): number[] => {
     const totalCols = isPerfboard ? (board as PerfboardModel).cols : (board as { metadata: { columns: number } }).metadata.columns;
     const cols: number[] = [];
@@ -364,17 +308,49 @@
   function holeAtGrid(col: number, row: string) {
     return board.holes.find((h) => h.grid.col === col && h.grid.row === row);
   }
+
+  // Board footprint rectangle (the actual plastic surface). Pulled from
+  // zones with kind="main" so the perfboard case (no zones) renders a
+  // generic rectangle.
+  const boardFootprint = $derived.by(() => {
+    if (isPerfboard) {
+      return {
+        x: -2,
+        y: -2,
+        w: (board as PerfboardModel).cols * (board as PerfboardModel).pitchMm + 4,
+        h: (board as PerfboardModel).rows * (board as PerfboardModel).pitchMm + 4
+      };
+    }
+    const main = (board as Exclude<AnyBoardModel, PerfboardModel>).zones.find(
+      (z) => z.kind === 'main'
+    );
+    if (main) {
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      for (const p of main.polygon) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+      return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }
+    return { x: -2, y: -15, w: 80, h: 60 };
+  });
+
+  // Center-gap polygon for the visual "channel" between rows e and f.
+  const centerGap = $derived.by(() => {
+    if (isPerfboard) return null;
+    const gap = (board as Exclude<AnyBoardModel, PerfboardModel>).zones.find(
+      (z) => z.kind === 'center-gap'
+    );
+    if (!gap) return null;
+    return gap.polygon.map((p) => toSvgPx(p));
+  });
 </script>
-<!--
-  This `<svg>` is a custom pannable/zoomable canvas surface (role="application"
-  per the standard ARIA pattern for widget-like custom UI, e.g. diagram/CAD
-  editors). Svelte's a11y checker does not special-case `application` for SVG
-  elements, but the pattern is correct: individual selectable children
-  (ComponentLayer/JumperLayer groups) already expose role="button" + tabindex
-  + keydown handlers, so keyboard users can reach and activate every
-  selectable element without needing the outer canvas itself to be a
-  tab-stop or handle key events directly.
--->
+
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <svg
@@ -391,8 +367,70 @@
   role="application"
   aria-label={isPerfboard ? 'Perfboard editor canvas' : 'Breadboard editor canvas'}
 >
+  <defs>
+    <!-- Plastic-board gradient: top edge a touch lighter, bottom a touch
+         cooler. Both stops sit in the same hue so the surface still reads
+         as one piece of ABS plastic. -->
+    <linearGradient id="board-plastic" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBFAF6" />
+      <stop offset="1" stop-color="#EFEBE0" />
+    </linearGradient>
+    <linearGradient id="rail-plus-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#C72922" />
+      <stop offset="0.5" stop-color="#D6332B" />
+      <stop offset="1" stop-color="#C72922" />
+    </linearGradient>
+    <linearGradient id="rail-minus-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0E0E0E" />
+      <stop offset="0.5" stop-color="#262624" />
+      <stop offset="1" stop-color="#0E0E0E" />
+    </linearGradient>
+    <!-- Reusable shadow for raised board surface. -->
+    <filter id="board-shadow" x="-5%" y="-5%" width="110%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-opacity="0.10" />
+    </filter>
+  </defs>
+
+  {#if true}
+    {@const fp = boardFootprint}
+    {@const fpTL = toSvgPx({ x: fp.x, y: fp.y })}
+    {@const fpW = fp.w * SCALE}
+    {@const fpH = fp.h * SCALE}
+    <!-- ===== Plastic body ===== -->
+    <g aria-hidden="true">
+      <rect
+        x={fpTL.x}
+        y={fpTL.y}
+        width={fpW}
+        height={fpH}
+        rx="3"
+        ry="3"
+        fill="url(#board-plastic)"
+        stroke="#D6CFBE"
+        stroke-width="0.6"
+        filter="url(#board-shadow)"
+      />
+
+      <!-- Faint ruled grid behind the holes. Each pitch is 2.54 mm. -->
+      {#each labelColumns as col (col)}
+        {@const h = holeAtGrid(col, labelRows[0])}
+        {#if h}
+          {@const x = toSvgPx({ x: h.point.x, y: fp.y }).x}
+          <line
+            x1={x}
+            x2={x}
+            y1={fpTL.y + 2}
+            y2={fpTL.y + fpH - 2}
+            stroke="rgba(24, 23, 21, 0.025)"
+            stroke-width="0.3"
+          />
+        {/if}
+      {/each}
+    </g>
+  {/if}
+
   {#if !isPerfboard}
-    <!-- Tie-point group shading -->
+    <!-- ===== Tie-point group shading ===== -->
     <g class="tie-point-shading" aria-hidden="true">
       {#each tiePointGroups as group (group.id)}
         {@const b = groupBounds(group)}
@@ -403,97 +441,122 @@
             y={tl.y}
             width={b.w * SCALE}
             height={b.h * SCALE}
-            rx="2"
-            ry="2"
-            fill="rgba(0, 0, 0, 0.04)"
-            stroke="rgba(0, 0, 0, 0.06)"
-            stroke-width="0.5"
+            rx="1"
+            ry="1"
+            fill="rgba(11, 77, 255, 0.045)"
+            stroke="rgba(11, 77, 255, 0.16)"
+            stroke-width="0.4"
           />
         {/if}
       {/each}
     </g>
 
-    <!-- Rail strips -->
+    <!-- ===== Center-gap channel ===== -->
+    {#if centerGap && centerGap.length > 1}
+      <polygon
+        points={centerGap.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')}
+        fill="rgba(24, 23, 21, 0.04)"
+        stroke="rgba(24, 23, 21, 0.10)"
+        stroke-width="0.3"
+      />
+    {/if}
+
+    <!-- ===== Rail strips ===== -->
     <g class="rails" aria-hidden="true">
-      {#each railStrips as rail (rail.id)}
-        {@const tl = toSvgPx({ x: rail.x, y: rail.y })}
+      {#each railStrips as strip (strip.id)}
+        {@const tl = toSvgPx({ x: strip.x, y: strip.y })}
         <rect
           x={tl.x}
           y={tl.y}
-          width={rail.w * SCALE}
+          width={strip.w * SCALE}
           height={board.pitchMm * SCALE}
-          fill={rail.color === 'plus' ? 'var(--color-rail-plus)' : 'var(--color-rail-minus)'}
-          opacity="0.85"
+          rx="0.6"
+          ry="0.6"
+          fill={strip.color === 'plus' ? 'url(#rail-plus-grad)' : 'url(#rail-minus-grad)'}
+          stroke={strip.color === 'plus' ? '#9A1F1B' : '#000000'}
+          stroke-width="0.4"
         />
+        <text
+          x={tl.x + (strip.w * SCALE) / 2}
+          y={tl.y + (board.pitchMm * SCALE) / 2 + 0.9 * SCALE}
+          text-anchor="middle"
+          dominant-baseline="middle"
+          font-family="'JetBrains Mono', monospace"
+          font-size="2.6"
+          font-weight="700"
+          fill={strip.color === 'plus' ? '#FFE9E6' : '#E8E6E0'}
+        >
+          {strip.label}
+        </text>
       {/each}
     </g>
   {/if}
 
-  <!-- Holes + labels -->
+  <!-- ===== Holes + labels ===== -->
   <HoleLayer
     {board}
     {showLabels}
     {SCALE}
-    toSvgPx={toSvgPx}
-    labelColumns={labelColumns}
-    labelRows={labelRows}
-    holeAtGrid={holeAtGrid}
+    {toSvgPx}
+    {labelColumns}
+    {labelRows}
+    {holeAtGrid}
+    {jumperToolActive}
     highlightHoleId={pendingStart}
-    jumperToolActive={jumperToolActive}
   />
 
-  <!-- Jumpers (breadboard) or copper traces + vias (perfboard), drawn under
-       component bodies so they appear to go behind. -->
+  <!-- ===== Jumpers / traces ===== -->
   {#if layout}
     {#if isTraceLayout(layout)}
-      <ViaLayer vias={layout.vias} {SCALE} toSvgPx={toSvgPx} />
+      <ViaLayer vias={layout.vias} {SCALE} {toSvgPx} />
       <TraceLayer
         traces={layout.traces}
         {SCALE}
-        toSvgPx={toSvgPx}
+        {toSvgPx}
         selectedId={selectedKind === 'trace' ? selectedId : null}
-        {onSelect}
+        onSelect={(kind, id) => onSelect?.(kind, id)}
       />
     {:else}
       <JumperLayer
         jumpers={layout.jumpers}
         {SCALE}
-        toSvgPx={toSvgPx}
+        {toSvgPx}
         selectedId={selectedKind === 'jumper' ? selectedId : null}
-        {onSelect}
+        onSelect={(kind, id) => onSelect?.(kind, id)}
       />
     {/if}
   {/if}
 
-  <!-- Placements -->
+  <!-- ===== Components ===== -->
   {#if layout}
     <ComponentLayer
       {board}
-      placements={layout.placements}
+      placements={!isTraceLayout(layout) ? layout.placements : []}
       {SCALE}
-      toSvgPx={toSvgPx}
+      {toSvgPx}
       selectedId={selectedKind === 'component' ? selectedId : null}
       {onSelect}
       {onPlacementMove}
-      {holeAt}
+      holeAt={holeAt}
     />
   {/if}
 </svg>
 
 <style>
   .board-canvas {
-    width: 100%;
-    height: 100%;
-    min-height: 400px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
     display: block;
-    touch-action: none;
-    cursor: grab;
+    user-select: none;
+    background:
+      radial-gradient(ellipse at 50% 40%, #ffffff 0%, #f7f4ec 70%, #efe9d8 100%);
+    border-radius: 6px;
   }
 
-  .board-canvas:active {
-    cursor: grabbing;
+  .board-canvas:focus {
+    outline: none;
+  }
+
+  .rails text {
+    pointer-events: none;
+    user-select: none;
   }
 </style>

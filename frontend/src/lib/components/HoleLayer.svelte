@@ -10,10 +10,6 @@
     labelColumns: number[];
     labelRows: string[];
     holeAtGrid: (col: number, row: string) => Hole | undefined;
-    // When the jumper tool is active the user is in "pick two holes" mode:
-    // we route every hole click into a data-attribute the canvas watches,
-    // and draw a ring around the start endpoint so they can see what
-    // they've already picked.
     jumperToolActive?: boolean;
     highlightHoleId?: string | null;
   };
@@ -29,24 +25,40 @@
     highlightHoleId = null
   }: Props = $props();
 
-  const HOLE_RADIUS_MM = 0.75; // ~1.5 mm diameter, matches a 0.3" pitch hole
+  // Hole drawing. Slightly larger than the physical 0.75 mm so the grid
+  // reads at typical zoom. The inner "shadow" gives the impression of a
+  // real recess rather than a flat dot.
+  const HOLE_RADIUS_MM = 0.85;
+  const HOLE_INNER_MM = 0.55;
 </script>
 
 <g class="holes">
   {#each board.holes as hole (hole.id)}
     {#if hole.enabled}
       {@const svgPt = toSvgPx({ x: hole.point.x, y: hole.point.y })}
-      <circle
-        class="hole"
-        class:pickable={jumperToolActive}
-        data-hole-id={hole.id}
-        cx={svgPt.x}
-        cy={svgPt.y}
-        r={HOLE_RADIUS_MM * SCALE}
-        fill="#ffffff"
-        stroke={highlightHoleId === hole.id ? 'var(--color-accent)' : '#404040'}
-        stroke-width={highlightHoleId === hole.id ? 1.2 * SCALE : 0.3 * SCALE}
-      />
+      {@const r = HOLE_RADIUS_MM * SCALE}
+      {@const ir = HOLE_INNER_MM * SCALE}
+      {@const isHighlight = highlightHoleId === hole.id}
+      {@const isPickable = jumperToolActive}
+      <g class="hole-group" class:pickable={isPickable}>
+        <circle
+          class="hole-outer"
+          cx={svgPt.x}
+          cy={svgPt.y}
+          r={r}
+          fill="#F2EFE7"
+          stroke={isHighlight ? 'var(--accent-1)' : '#A8A294'}
+          stroke-width={isHighlight ? 0.5 * SCALE : 0.25 * SCALE}
+          data-hole-id={hole.id}
+        />
+        <circle
+          cx={svgPt.x}
+          cy={svgPt.y}
+          r={ir}
+          fill="#1A1816"
+          pointer-events="none"
+        />
+      </g>
     {/if}
   {/each}
 </g>
@@ -59,43 +71,47 @@
       class="hole-highlight"
       cx={svgPt.x}
       cy={svgPt.y}
-      r={HOLE_RADIUS_MM * 2.2 * SCALE}
+      r={HOLE_RADIUS_MM * 2.6 * SCALE}
       fill="none"
-      stroke="var(--color-accent)"
-      stroke-width={1.2 * SCALE}
+      stroke="var(--accent-1)"
+      stroke-width={0.8 * SCALE}
+      stroke-dasharray={`${0.8 * SCALE} ${0.6 * SCALE}`}
+      pointer-events="none"
     />
   {/if}
 {/if}
 
 {#if showLabels}
   <g class="labels" aria-hidden="true">
-    <!-- Column numbers along the top of the board (row a) -->
     {#each labelColumns as col (col)}
-      {@const h = holeAtGrid(col, 'a')}
+      {@const h = holeAtGrid(col, labelRows[0])}
       {#if h}
         {@const svgPt = toSvgPx({ x: h.point.x, y: h.point.y })}
         <text
           x={svgPt.x}
-          y={svgPt.y - 3 * SCALE}
+          y={svgPt.y - 3.4 * SCALE}
           text-anchor="middle"
-          font-size={2.4 * SCALE}
-          fill="var(--color-muted)"
+          font-family="'JetBrains Mono', monospace"
+          font-size="2.6"
+          font-weight="500"
+          fill="#8C8676"
         >
           {col}
         </text>
       {/if}
     {/each}
-    <!-- Row letters along the left of the board (column 1) -->
     {#each labelRows as row (row)}
       {@const h = holeAtGrid(1, row)}
       {#if h}
         {@const svgPt = toSvgPx({ x: h.point.x, y: h.point.y })}
         <text
-          x={svgPt.x - 3 * SCALE}
-          y={svgPt.y + 0.8 * SCALE}
+          x={svgPt.x - 3.2 * SCALE}
+          y={svgPt.y + 1.2 * SCALE}
           text-anchor="end"
-          font-size={2.4 * SCALE}
-          fill="var(--color-muted)"
+          font-family="'JetBrains Mono', monospace"
+          font-size="2.6"
+          font-weight="500"
+          fill="#8C8676"
         >
           {row}
         </text>
@@ -106,15 +122,22 @@
 
 <style>
   .holes {
-    /* Hole strokes look better with shape-rendering: geometricPrecision */
     shape-rendering: geometricPrecision;
   }
 
-  .hole.pickable {
+  .hole-outer {
+    transition: stroke 120ms cubic-bezier(0.16, 1, 0.3, 1), stroke-width 120ms
+      cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .hole-group.pickable:hover .hole-outer {
+    stroke: var(--accent-1);
+    stroke-width: 0.6;
     cursor: crosshair;
   }
 
-  .hole-highlight {
+  .labels text {
+    user-select: none;
     pointer-events: none;
   }
 </style>

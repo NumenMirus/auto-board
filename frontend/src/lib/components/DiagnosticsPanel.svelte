@@ -4,16 +4,10 @@
   type Props = {
     diagnostics: Diagnostic[];
     onSelect?: ((d: Diagnostic) => void) | undefined;
-    // True once the validator has run at least once. Lets the empty
-    // state distinguish "nothing to show yet" from "we ran the validator
-    // and the layout is clean".
     validated?: boolean;
   };
   let { diagnostics, onSelect = undefined, validated = false }: Props = $props();
 
-  // Stable grouping order — the spec locks severity hierarchy (error first,
-  // warning second, info last). Inside a group the backend's id is already
-  // stable across runs so a plain sort by id gives a stable order.
   const SEVERITY_ORDER: DiagnosticSeverity[] = ['error', 'warning', 'info'];
 
   const grouped = $derived.by(() => {
@@ -30,31 +24,54 @@
     }
     return buckets;
   });
+
+  // Pretty-print a code like SHORT_BETWEEN_NETS into "Short between nets"
+  // for headings. The backend code stays untouched in the chip.
+  function prettyCode(code: string): string {
+    return code
+      .split('_')
+      .map((w) => (w.length === 0 ? '' : w[0]?.toUpperCase() + w.slice(1).toLowerCase()))
+      .join(' ');
+  }
 </script>
 
 <section class="diagnostics-panel" aria-label="Diagnostics">
   {#if diagnostics.length === 0}
     {#if validated}
-      <p class="empty-valid">Layout is valid</p>
+      <div class="empty valid">
+        <span class="check" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 14 14">
+            <path d="M3 7.5 L6 10.5 L11.5 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" />
+          </svg>
+        </span>
+        <span>Topology valid — no shorts, no opens.</span>
+      </div>
     {:else}
-      <p class="empty-idle">No diagnostics</p>
+      <p class="empty idle">No diagnostics — make a change to verify.</p>
     {/if}
   {:else}
     {#each SEVERITY_ORDER as sev (sev)}
       {#if grouped[sev].length > 0}
         <div class={`bucket bucket-${sev}`}>
-          <header class="bucket-header">
+          <header class="bucket-head">
+            <span class="bucket-dot" aria-hidden="true"></span>
             <span class="bucket-label">{sev}</span>
-            <span class="bucket-count">{grouped[sev].length}</span>
+            <span class="bucket-count mono">{grouped[sev].length}</span>
           </header>
           <ul>
             {#each grouped[sev] as d (d.id)}
               <li>
-                <button type="button" class="row" onclick={() => onSelect?.(d)}>
-                  <code class="code">{d.code}</code>
-                  <span class="message">{d.message}</span>
-                  {#if d.suggestion !== null}
-                    <span class="suggestion">→ {d.suggestion}</span>
+                <button
+                  type="button"
+                  class="diag-row"
+                  onclick={() => onSelect?.(d)}
+                  aria-label={`Diagnostic ${d.code}`}
+                >
+                  <span class="diag-code mono">{d.code}</span>
+                  <span class="diag-title">{prettyCode(d.code)}</span>
+                  <span class="diag-msg">{d.message}</span>
+                  {#if d.suggestion}
+                    <span class="diag-suggest">→ {d.suggestion}</span>
                   {/if}
                 </button>
               </li>
@@ -68,99 +85,158 @@
 
 <style>
   .diagnostics-panel {
+    padding: 0;
+    font-size: var(--fs-12);
+  }
+
+  .empty {
+    margin: 0;
+    color: var(--ink-3);
+    padding: var(--sp-3);
+    font-size: var(--fs-12);
+  }
+
+  .empty.idle {
+    font-style: italic;
+  }
+
+  .empty.valid {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    font-size: 13px;
+    align-items: center;
+    gap: 8px;
+    color: var(--ok);
+    font-weight: 500;
   }
 
-  .empty-valid {
-    margin: 0;
-    padding: var(--space-2);
-    color: var(--color-info);
-    background: rgba(37, 99, 235, 0.08);
-    border-left: 3px solid var(--color-info);
-    border-radius: var(--radius-sm);
-    font-style: italic;
-  }
-
-  .empty-idle {
-    margin: 0;
-    padding: var(--space-2);
-    color: var(--color-muted);
-    background: transparent;
-    border-left: 3px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    font-style: italic;
+  .check {
+    color: var(--ok);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--ok-soft);
+    border: 1px solid rgba(42, 110, 63, 0.3);
   }
 
   .bucket {
-    border-radius: var(--radius-sm);
-    overflow: hidden;
+    padding: var(--sp-3);
   }
 
-  .bucket-error {
-    border-left: 3px solid var(--color-error);
-  }
-  .bucket-warning {
-    border-left: 3px solid var(--color-warning);
-  }
-  .bucket-info {
-    border-left: 3px solid var(--color-info);
+  .bucket + .bucket {
+    border-top: 1px solid var(--paper-edge);
   }
 
-  .bucket-header {
+  .bucket-head {
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: var(--space-1) var(--space-2);
-    background: var(--color-surface);
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .bucket-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .bucket-error .bucket-dot {
+    background: var(--sev-error);
+  }
+  .bucket-warning .bucket-dot {
+    background: var(--sev-warning);
+  }
+  .bucket-info .bucket-dot {
+    background: var(--sev-info);
+  }
+
+  .bucket-label {
     text-transform: uppercase;
-    font-size: 11px;
-    letter-spacing: 0.04em;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    color: var(--ink-2);
   }
 
   .bucket-count {
-    color: var(--color-muted);
-    font-variant-numeric: tabular-nums;
+    margin-left: auto;
+    font-size: var(--fs-11);
+    color: var(--ink-3);
   }
 
   ul {
     list-style: none;
-    padding: 0;
     margin: 0;
-  }
-
-  .row {
-    width: 100%;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .diag-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     gap: 2px;
-    padding: var(--space-2);
-    background: transparent;
-    border: none;
-    border-bottom: 1px solid var(--color-border);
-    color: inherit;
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--paper-1);
+    border: 1px solid var(--paper-edge);
+    border-radius: var(--r-2);
     text-align: left;
     cursor: pointer;
+    transition: border-color var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out);
   }
 
-  .row:hover {
-    background: var(--color-surface);
+  .diag-row:hover {
+    border-color: var(--accent-1);
+    background: var(--paper-2);
   }
 
-  .code {
-    font-size: 11px;
-    color: var(--color-muted);
+  .diag-code {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-3);
+    letter-spacing: 0.04em;
   }
 
-  .message {
-    font-size: 13px;
+  .diag-title {
+    font-size: var(--fs-13);
+    color: var(--ink-1);
+    font-weight: 500;
   }
 
-  .suggestion {
-    font-size: 12px;
-    color: var(--color-muted);
+  .diag-msg {
+    font-size: var(--fs-12);
+    color: var(--ink-2);
+  }
+
+  .diag-suggest {
+    font-size: var(--fs-11);
+    color: var(--ink-3);
+    margin-top: 2px;
+  }
+
+  .bucket-error .diag-row {
+    background: var(--sev-error-soft);
+    border-color: var(--sev-error-line);
+  }
+  .bucket-error .diag-code {
+    color: var(--sev-error);
+  }
+  .bucket-warning .diag-row {
+    background: var(--sev-warning-soft);
+    border-color: var(--sev-warning-line);
+  }
+  .bucket-warning .diag-code {
+    color: var(--sev-warning);
+  }
+  .bucket-info .diag-row {
+    background: var(--sev-info-soft);
+    border-color: var(--sev-info-line);
+  }
+  .bucket-info .diag-code {
+    color: var(--sev-info);
   }
 </style>

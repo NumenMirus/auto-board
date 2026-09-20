@@ -49,67 +49,51 @@
   let lastValidateError = $state<string | null>(null);
   let jumperToolActive = $state(false);
   let selectedNetId = $state<string | null>(null);
-  // The id of the most-recently completed solver job — drives ExportMenu
-  // (downloads only make sense once a layout has been produced/saved).
   let lastResultLayoutId = $state<string | null>(null);
 
-  // ------------------------------------------------------------------------
-  // Load project + board + footprint catalog once.
-  // ------------------------------------------------------------------------
-  $effect(() => {
-    const id = params.id;
-    let cancelled = false;
+  // $effect(() => {
+  //   const id = params.id;
+  //   let cancelled = false;
 
-    async function load(): Promise<void> {
-      isLoading = true;
-      loadError = null;
-      try {
-        const envelope = await apiFetch<ProjectEnvelope>(`/projects/${id}`);
-        if (cancelled) return;
-        const [board, footprintsList] = await Promise.all([
-          apiFetch<AnyBoardModel & { kind: BoardKind }>(`/board-models/${envelope.boardModelId}`),
-          apiFetch<BreadboardFootprint[]>('/footprints')
-        ]);
-        if (cancelled) return;
-        const footprints: Record<string, BreadboardFootprint> = {};
-        for (const fp of footprintsList) footprints[fp.id] = fp;
+  //   async function load(): Promise<void> {
+  //     isLoading = true;
+  //     loadError = null;
+  //     try {
+  //       const envelope = await apiFetch<ProjectEnvelope>(`/projects/${id}`);
+  //       if (cancelled) return;
+  //       const [board, footprintsList] = await Promise.all([
+  //         apiFetch<AnyBoardModel & { kind: BoardKind }>(`/board-models/${envelope.boardModelId}`),
+  //         apiFetch<BreadboardFootprint[]>('/footprints')
+  //       ]);
+  //       if (cancelled) return;
+  //       const footprints: Record<string, BreadboardFootprint> = {};
+  //       for (const fp of footprintsList) footprints[fp.id] = fp;
 
-        projectStore.document = envelope.document;
-        projectStore.board = board;
-        projectStore.boardKind = board.kind;
-        projectStore.footprints = footprints;
-        projectStore.traceLayout = null;
-        // Seed the undo machinery with the loaded layout so the first
-        // mutation isn't preceded by a "ghost" empty-state undo entry.
-        // Perfboard layouts don't use the breadboard undo stack.
-        if (board.kind === 'breadboard') {
-          projectStore.pushUndo(envelope.document.layout);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        loadError = err instanceof ApiError ? err.message : 'Failed to load project.';
-      } finally {
-        if (!cancelled) isLoading = false;
-      }
-    }
+  //       projectStore.document = envelope.document;
+  //       projectStore.board = board;
+  //       projectStore.boardKind = board.kind;
+  //       projectStore.footprints = footprints;
+  //       projectStore.traceLayout = null;
+  //       if (board.kind === 'breadboard') {
+  //         projectStore.pushUndo(envelope.document.layout);
+  //       }
+  //     } catch (err) {
+  //       if (cancelled) return;
+  //       loadError = err instanceof ApiError ? err.message : 'Failed to load project.';
+  //     } finally {
+  //       if (!cancelled) isLoading = false;
+  //     }
+  //   }
 
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  });
+  //   void load();
+  //   return () => {
+  //     cancelled = true;
+  //   };
+  // });
 
-  // ------------------------------------------------------------------------
-  // Live validation. Debounced 250ms per main spec §9.2 ("after every
-  // mutation: update occupancy locally, then debounce 250ms and POST
-  // /api/v1/validate"). Runs whenever the document layout changes.
-  // ------------------------------------------------------------------------
   const runValidate = async (): Promise<void> => {
     const doc = projectStore.document;
     const board = projectStore.board;
-    // The synchronous /validate endpoint only understands breadboard
-    // Layouts; perfboard diagnostics come from the trace-solve job result
-    // instead (there's no live-edit loop for perfboard traces yet).
     if (doc === null || board === null || projectStore.boardKind === 'perfboard') return;
     validatingNow = true;
     lastValidateError = null;
@@ -133,19 +117,10 @@
   const debouncedValidate = debounce(runValidate, 250);
 
   $effect(() => {
-    // Subscribe to the layout — every mutation produces a new object, so
-    // this effect fires on each one. The debounced wrapper coalesces
-    // bursts so we don't hammer the backend during a drag.
     void projectStore.document?.layout;
     debouncedValidate();
   });
 
-  // ------------------------------------------------------------------------
-  // Local mutation handlers. Each one builds a fresh `Layout`, applies
-  // it through `applyLayoutMutation` (which pushes the prior layout to
-  // the undo stack and installs the new one), then triggers the
-  // debounced validate. Locked placements are not movable.
-  // ------------------------------------------------------------------------
   function movePlacement(componentRef: string, newAnchorHoleId: string): void {
     const doc = projectStore.document;
     if (doc === null) return;
@@ -153,10 +128,6 @@
       ...doc.layout,
       placements: doc.layout.placements.map((p) => {
         if (p.componentRef !== componentRef) return p;
-        // We can't recompute occupiedHoleIds / pinHoles client-side
-        // without the full placement engine; the server will do that on
-        // the next validate. We update only the anchor and leave the rest
-        // for the backend to fill in.
         return { ...p, anchorHoleId: newAnchorHoleId };
       })
     };
@@ -192,8 +163,6 @@
   }
 
   function deleteSelection(kind: 'component' | 'jumper' | 'trace', id: string): void {
-    // Traces are solver-generated (never hand-drawn); there's no delete
-    // affordance for them, so a trace selection is a no-op here.
     if (kind === 'trace') return;
     const doc = projectStore.document;
     if (doc === null) return;
@@ -214,9 +183,6 @@
   function createJumperBetween(startHoleId: string, endHoleId: string): void {
     const doc = projectStore.document;
     if (doc === null) return;
-    // Pick the net that currently owns at least one of the two holes; if
-    // none, fall back to the first net (the validator will surface the
-    // NET_OPEN if the user picked two holes on different nets).
     const net = doc.nets[0];
     if (net === undefined) return;
     const id = `j-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
@@ -239,9 +205,6 @@
     projectStore.applyLayoutMutation(next);
   }
 
-  // ------------------------------------------------------------------------
-  // Net panel handlers.
-  // ------------------------------------------------------------------------
   function setSelectedNet(netId: string | null): void {
     selectedNetId = netId;
     projectStore.setSelection(netId === null ? { kind: null, id: null } : { kind: 'net', id: netId });
@@ -267,9 +230,6 @@
     projectStore.document = nextDoc;
   }
 
-  // ------------------------------------------------------------------------
-  // Toolbar -> jobs. Validate is synchronous and skips the queue.
-  // ------------------------------------------------------------------------
   async function startOperation(operation: SolverOperation): Promise<void> {
     const doc = projectStore.document;
     if (doc === null) return;
@@ -277,11 +237,6 @@
       await runValidate();
       return;
     }
-    // Perfboard has no separate placement phase and no synchronous
-    // validator; only 'route' and 'solve' are meaningful, and the backend
-    // exposes them under different operation names (trace-route /
-    // trace-solve). The Toolbar hides Auto-place/Optimize for perfboard
-    // (see the template below), so those two never reach here for it.
     const resolvedOperation: SolverOperation =
       projectStore.boardKind === 'perfboard'
         ? operation === 'route'
@@ -327,17 +282,9 @@
     projectStore.diagnostics = result.diagnostics;
     projectStore.score = result.score;
     projectStore.clearJob();
-    // Re-run the synchronous validator so diagnostics stay consistent with
-    // what the editor actually displays. No-ops for perfboard (see
-    // runValidate's guard) since its diagnostics already came from the
-    // trace-solve job result above.
     void runValidate();
   }
 
-  // ------------------------------------------------------------------------
-  // Undo / redo via Ctrl+Z / Ctrl+Shift+Z (also ⌘ on macOS). After
-  // jumping, re-validate so diagnostics stay in sync.
-  // ------------------------------------------------------------------------
   function handleUndo(): void {
     const prev = projectStore.undo();
     if (prev === undefined) return;
@@ -377,16 +324,10 @@
     };
   });
 
-  // ------------------------------------------------------------------------
-  // Selection plumbing. The BoardCanvas only reports intent; we own the
-  // authoritative state.
-  // ------------------------------------------------------------------------
   function onSelect(kind: 'component' | 'jumper' | 'trace', id: string): void {
     projectStore.setSelection({ kind, id });
   }
 
-  // Project the store's wide Selection union onto the narrower shape
-  // BoardCanvas wants (component/jumper/trace).
   const canvasSelectionId = $derived(
     projectStore.selection.kind === 'component' ||
       projectStore.selection.kind === 'jumper' ||
@@ -402,9 +343,6 @@
       : null
   );
 
-  // ------------------------------------------------------------------------
-  // Advanced panel -> mutate the document's `settings`.
-  // ------------------------------------------------------------------------
   function updateSeed(seed: number): void {
     const doc = projectStore.document;
     if (doc === null) return;
@@ -434,201 +372,553 @@
     };
   }
 
-  </script>
+  // Derived status for the bottom status bar.
+  const boardKindLabel = $derived(projectStore.boardKind === 'perfboard' ? 'Perfboard' : 'Breadboard');
+  const placedCount = $derived(projectStore.document?.layout.placements.length ?? 0);
+  const totalCount = $derived(projectStore.document?.components.length ?? 0);
+  const jumperCount = $derived(projectStore.document?.layout.jumpers.length ?? 0);
+  const errorCount = $derived(projectStore.diagnostics.filter((d) => d.severity === 'error').length);
+  const warningCount = $derived(projectStore.diagnostics.filter((d) => d.severity === 'warning').length);
+
+  const diagnosticsBanner = $derived.by(() => {
+    if (validatingNow) return { tone: 'pending', text: 'Verifying topology…' };
+    if (lastValidateError !== null) return { tone: 'error', text: lastValidateError };
+    if (errorCount > 0) return { tone: 'error', text: `${errorCount} open circuit error${errorCount === 1 ? '' : 's'}` };
+    if (warningCount > 0) return { tone: 'warning', text: `${warningCount} warning${warningCount === 1 ? '' : 's'}` };
+    if (projectStore.score !== null) return { tone: 'ok', text: 'Topology valid' };
+    return { tone: 'idle', text: 'Idle — make a change to verify' };
+  });
+</script>
 
 <section class="editor">
-  <header class="editor-header">
-    <a href="/" class="back">&larr; Projects</a>
-    <h1>{projectStore.document?.name ?? params.id}</h1>
-    <div class="actions-inline">
+  <!-- ====================== Header strip =========================== -->
+  <header class="ed-header">
+    <div class="ed-header-left">
+      <a href="/" class="back-link">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M7.5 2L3.5 6l4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        Projects
+      </a>
+      <div class="ed-title-block">
+        <span class="ed-kind mono">{boardKindLabel}</span>
+        <h1 class="ed-title">{projectStore.document?.name ?? params.id}</h1>
+      </div>
+    </div>
+
+    <div class="ed-header-right">
       <button
         type="button"
-        class="jumper-toggle"
+        class="tool-button"
         class:active={jumperToolActive}
+        aria-pressed={jumperToolActive}
         onclick={() => (jumperToolActive = !jumperToolActive)}
+        title="Click two holes to create a wire (Esc to cancel)"
       >
-        {jumperToolActive ? 'Exit jumper tool' : 'Jumper tool'}
+        <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+          <path d="M2 6.5h9M6.5 2v9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+        </svg>
+        <span>{jumperToolActive ? 'Exit jumper' : 'Jumper tool'}</span>
       </button>
     </div>
   </header>
 
+  <!-- ====================== Toolbar =========================== -->
+  <Toolbar
+    disabled={false}
+    showAutoPlace={projectStore.boardKind !== 'perfboard'}
+    showValidate={projectStore.boardKind !== 'perfboard'}
+    showOptimize={projectStore.boardKind !== 'perfboard'}
+    onAutoPlace={() => void startOperation('place')}
+    onAutoRoute={() => void startOperation('route')}
+    onSolve={() => void startOperation('solve')}
+    onValidate={() => void startOperation('validate')}
+    onOptimize={() => void startOperation('optimize')}
+  />
+
+  <!-- ====================== Job progress (compact ribbon) =========================== -->
+  <JobProgress
+    jobId={projectStore.jobId}
+    onApply={onApplySolverResult}
+    onJobUpdate={(job) => {
+      if (typeof job.resultLayoutId === 'string') {
+        lastResultLayoutId = job.resultLayoutId;
+      }
+    }}
+  />
+
+  <!-- ====================== Body grid: canvas | sidebar =========================== -->
   {#if loadError}
-    <p class="error">Error: {loadError}</p>
+    <div class="ed-error">
+      <strong>Couldn't load project.</strong>
+      <span>{loadError}</span>
+    </div>
   {:else if isLoading}
-    <p class="loading">Loading project…</p>
+    <div class="ed-loading">Loading project…</div>
   {:else if projectStore.board && projectStore.document}
-    <Toolbar
-      disabled={false}
-      showAutoPlace={projectStore.boardKind !== 'perfboard'}
-      showValidate={projectStore.boardKind !== 'perfboard'}
-      showOptimize={projectStore.boardKind !== 'perfboard'}
-      onAutoPlace={() => void startOperation('place')}
-      onAutoRoute={() => void startOperation('route')}
-      onSolve={() => void startOperation('solve')}
-      onValidate={() => void startOperation('validate')}
-      onOptimize={() => void startOperation('optimize')}
-    />
+    <div class="ed-body">
+      <div class="canvas-stage">
+        <div class="canvas-frame">
+          <BoardCanvas
+            board={projectStore.board}
+            layout={projectStore.boardKind === 'perfboard'
+              ? (projectStore.traceLayout ?? undefined)
+              : projectStore.document.layout}
+            showLabels={true}
+            jumperToolActive={jumperToolActive}
+            jumperStartHoleId={null}
+            selectedId={canvasSelectionId}
+            selectedKind={canvasSelectionKind}
+            onPlacementMove={movePlacement}
+            onRotate={rotatePlacement}
+            onLockToggle={toggleLockPlacement}
+            onDelete={deleteSelection}
+            onJumperCreate={createJumperBetween}
+            onSelect={onSelect}
+          />
+        </div>
+      </div>
 
-    <JobProgress
-      jobId={projectStore.jobId}
-      onApply={onApplySolverResult}
-      onJobUpdate={(job) => {
-        if (typeof job.resultLayoutId === 'string') {
-          lastResultLayoutId = job.resultLayoutId;
-        }
-      }}
-    />
+      <aside class="ed-sidebar" aria-label="Project sidebar">
+        <section class="panel">
+          <header class="panel-header">
+            <h2>Layout readout</h2>
+          </header>
+          <MetricsBar score={projectStore.score} />
+        </section>
 
-    <div class="canvas-wrap">
-      <BoardCanvas
-        board={projectStore.board}
-        layout={projectStore.boardKind === 'perfboard'
-          ? (projectStore.traceLayout ?? undefined)
-          : projectStore.document.layout}
-        showLabels={true}
-        jumperToolActive={jumperToolActive}
-        jumperStartHoleId={null}
-        selectedId={canvasSelectionId}
-        selectedKind={canvasSelectionKind}
-        onPlacementMove={movePlacement}
-        onRotate={rotatePlacement}
-        onLockToggle={toggleLockPlacement}
-        onDelete={deleteSelection}
-        onJumperCreate={createJumperBetween}
-        onSelect={onSelect}
-      />
+        <section class="panel">
+          <header class="panel-header">
+            <h2>Nets</h2>
+            <span class="panel-meta mono">{projectStore.document.nets.length}</span>
+          </header>
+          <NetPanel
+            nets={projectStore.document.nets}
+            selectedNetId={selectedNetId}
+            onSelectNet={setSelectedNet}
+            onChangeNetClass={changeNetClass}
+            onChangePriority={changePriority}
+          />
+        </section>
+
+        <section class="panel">
+          <header class="panel-header">
+            <h2>Diagnostics</h2>
+            <span
+              class="panel-meta mono"
+              class:has-error={errorCount > 0}
+              class:has-warning={errorCount === 0 && warningCount > 0}
+            >
+              {errorCount > 0 ? errorCount : warningCount > 0 ? `!${warningCount}` : '✓'}
+            </span>
+          </header>
+          <DiagnosticsPanel
+            diagnostics={projectStore.diagnostics}
+            validated={projectStore.score !== null}
+            onSelect={(d) => {
+              const ref = d.relatedComponentRefs[0];
+              if (ref !== undefined) {
+                onSelect('component', ref);
+              }
+            }}
+          />
+        </section>
+
+        {#if projectStore.document.settings !== undefined}
+          <section class="panel">
+            <AdvancedPanel
+              seed={projectStore.document.settings.seed}
+              preset={projectStore.document.settings.solverPreset as 'fast' | 'balanced' | 'quality'}
+              placementWeights={projectStore.document.settings.placementWeights}
+              routingWeights={projectStore.document.settings.routingWeights}
+              allowCriticalNetClasses={projectStore.document.settings.allowCriticalNetClasses}
+              onSeedChange={updateSeed}
+              onPresetChange={updatePreset}
+              onPlacementWeightsChange={updatePlacementWeights}
+              onRoutingWeightsChange={updateRoutingWeights}
+              onAllowCriticalChange={updateAllowCritical}
+            />
+          </section>
+        {/if}
+
+        <section class="panel">
+          <header class="panel-header">
+            <h2>Export</h2>
+          </header>
+          <ExportMenu layoutId={lastResultLayoutId} boardKind={projectStore.boardKind} />
+        </section>
+
+        <SafetyNotice />
+      </aside>
     </div>
 
-    <aside class="sidebar">
-      <MetricsBar score={projectStore.score} />
-      <DiagnosticsPanel
-        diagnostics={projectStore.diagnostics}
-        validated={projectStore.score !== null}
-        onSelect={(d) => {
-          const ref = d.relatedComponentRefs[0];
-          if (ref !== undefined) {
-            onSelect('component', ref);
-          }
-        }}
-      />
-      <NetPanel
-        nets={projectStore.document.nets}
-        selectedNetId={selectedNetId}
-        onSelectNet={setSelectedNet}
-        onChangeNetClass={changeNetClass}
-        onChangePriority={changePriority}
-      />
-      {#if projectStore.document.settings !== undefined}
-        <AdvancedPanel
-          seed={projectStore.document.settings.seed}
-          preset={projectStore.document.settings.solverPreset as 'fast' | 'balanced' | 'quality'}
-          placementWeights={projectStore.document.settings.placementWeights}
-          routingWeights={projectStore.document.settings.routingWeights}
-          allowCriticalNetClasses={projectStore.document.settings.allowCriticalNetClasses}
-          onSeedChange={updateSeed}
-          onPresetChange={updatePreset}
-          onPlacementWeightsChange={updatePlacementWeights}
-          onRoutingWeightsChange={updateRoutingWeights}
-          onAllowCriticalChange={updateAllowCritical}
-        />
-      {/if}
-      <ExportMenu layoutId={lastResultLayoutId} boardKind={projectStore.boardKind} />
-    </aside>
-
-    {#if validatingNow}
-      <p class="validating">Validating…</p>
-    {/if}
-    {#if lastValidateError !== null}
-      <p class="error">{lastValidateError}</p>
-    {/if}
+    <!-- ====================== Status bar =========================== -->
+    <footer class="status-bar" role="status" aria-live="polite">
+      <span class="status-segment mono">
+        <span class="status-label">board</span>
+        <span class="status-value">{boardKindLabel.toLowerCase()}</span>
+      </span>
+      <span class="status-segment mono">
+        <span class="status-label">placed</span>
+        <span class="status-value">{placedCount}/{totalCount}</span>
+      </span>
+      <span class="status-segment mono">
+        <span class="status-label">wires</span>
+        <span class="status-value">{jumperCount}</span>
+      </span>
+      <span class="status-segment" data-tone={diagnosticsBanner.tone}>
+        <span class="status-dot" aria-hidden="true"></span>
+        <span class="status-text">{diagnosticsBanner.text}</span>
+      </span>
+    </footer>
   {/if}
 </section>
-
-<footer class="page-footer">
-  <SafetyNotice />
-</footer>
 
 <style>
   .editor {
     display: grid;
-    grid-template-columns: 1fr 320px;
     grid-template-rows: auto auto auto 1fr auto;
-    grid-template-areas:
-      'header header'
-      'toolbar toolbar'
-      'progress progress'
-      'canvas sidebar'
-      'error error';
-    gap: var(--space-3);
-    padding: var(--space-3);
     flex: 1;
     min-height: 0;
+    background: var(--paper-1);
   }
 
-  .editor-header {
-    grid-area: header;
+  /* ----- Header strip ----- */
+  .ed-header {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: 10px 18px 8px;
+    background: var(--paper-2);
+    border-bottom: 1px solid var(--paper-edge);
+  }
+
+  .ed-header-left {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    min-width: 0;
+  }
+
+  .ed-header-right {
+    margin-left: auto;
+    display: flex;
+    gap: var(--sp-2);
+    align-items: center;
+  }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: var(--r-2);
+    color: var(--ink-2);
+    font-size: var(--fs-13);
+    text-decoration: none;
+    transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+  }
+
+  .back-link:hover {
+    background: var(--paper-3);
+    color: var(--ink-1);
+    text-decoration: none;
+  }
+
+  .ed-title-block {
     display: flex;
     align-items: baseline;
-    gap: var(--space-3);
+    gap: 10px;
+    min-width: 0;
   }
 
-  .editor-header h1 {
-    margin: 0;
-    font-size: 18px;
+  .ed-kind {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+    padding: 2px 6px;
+    border: 1px solid var(--paper-edge);
+    border-radius: var(--r-1);
+    background: var(--paper-1);
   }
 
-  .actions-inline {
-    margin-left: auto;
+  .ed-title {
+    font-size: var(--fs-17);
+    font-weight: 600;
+    color: var(--ink-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 38ch;
   }
 
-  .jumper-toggle {
-    padding: 4px 10px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--color-border);
-    background: var(--color-bg);
-    color: var(--color-fg);
+  .tool-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: var(--fs-13);
   }
 
-  .jumper-toggle.active {
-    background: var(--color-accent);
-    color: white;
-    border-color: var(--color-accent);
+  .tool-button.active {
+    background: var(--accent-1);
+    border-color: var(--accent-1);
+    color: #fff;
   }
 
-  .canvas-wrap {
-    grid-area: canvas;
-    min-height: 480px;
-    border-radius: var(--radius-md);
+  .tool-button.active:hover {
+    background: var(--accent-3);
+    border-color: var(--accent-3);
+  }
+
+  /* ----- Body grid ----- */
+  .ed-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    min-height: 0;
     overflow: hidden;
   }
 
-  .sidebar {
-    grid-area: sidebar;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: var(--space-3);
-    background: var(--color-surface);
-    overflow: auto;
+  .canvas-stage {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: var(--r-3);
+    background: var(--paper-0);
+    border: 1px solid var(--paper-edge);
+    box-shadow: var(--sh-1);
+    display: flex;
+  }
+
+  .canvas-frame {
+    flex: 1;
+    min-height: 540px;
+    display: flex;
+  }
+
+  .canvas-frame :global(.board-canvas) {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+  }
+
+  .canvas-frame :global(.board-canvas:active) {
+    cursor: grabbing;
+  }
+
+  .ed-sidebar {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: var(--sp-3);
+    overflow-y: auto;
+    padding-right: 4px;
   }
 
-  .error {
-    grid-area: error;
-    color: var(--color-error);
-    margin: 0;
+  .panel {
+    background: var(--paper-0);
+    border: 1px solid var(--paper-edge);
+    border-radius: var(--r-3);
+    box-shadow: var(--sh-1);
+    overflow: hidden;
   }
 
-  .loading,
-  .validating {
-    color: var(--color-muted);
-    margin: 0;
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 8px 12px;
+    background: var(--paper-2);
+    border-bottom: 1px solid var(--paper-edge);
   }
 
-  .page-footer {
-    border-top: 1px solid var(--color-border);
-    padding: var(--space-2) var(--space-3);
-    background: var(--color-surface);
+  .panel-header h2 {
+    font-size: var(--fs-11);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-2);
+    flex: 1;
+  }
+
+  .panel-meta {
+    font-size: var(--fs-11);
+    color: var(--ink-3);
+    padding: 1px 6px;
+    border-radius: var(--r-1);
+    background: var(--paper-1);
+    border: 1px solid var(--paper-edge);
+  }
+
+  .panel-meta.has-error {
+    color: var(--sev-error);
+    background: var(--sev-error-soft);
+    border-color: var(--sev-error-line);
+  }
+
+  .panel-meta.has-warning {
+    color: var(--sev-warning);
+    background: var(--sev-warning-soft);
+    border-color: var(--sev-warning-line);
+  }
+
+  .panel :global(section) {
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+
+  .panel :global(.advanced-panel) {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    padding: var(--sp-3);
+  }
+
+  .panel :global(.export-menu) {
+    padding: var(--sp-3);
+  }
+
+  .panel :global(.metrics-bar) {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    padding: var(--sp-3);
+  }
+
+  .panel :global(.net-panel) {
+    padding: var(--sp-2) 0;
+  }
+
+  .panel :global(.diagnostics-panel) {
+    padding: var(--sp-2) 0;
+  }
+
+  .panel :global(.safety-notice) {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    background: var(--sev-warning-soft);
+    padding: var(--sp-3);
+    font-size: var(--fs-12);
+  }
+
+  /* ----- Status bar ----- */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    height: 30px;
+    padding: 0 18px;
+    background: var(--paper-2);
+    border-top: 1px solid var(--paper-edge);
+    font-size: var(--fs-11);
+    color: var(--ink-2);
+  }
+
+  .status-segment {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    height: 100%;
+    border-right: 1px solid var(--paper-edge);
+  }
+
+  .status-segment:last-child {
+    border-right: none;
+  }
+
+  .status-segment.mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .status-label {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-4);
+    font-size: 10px;
+  }
+
+  .status-value {
+    color: var(--ink-1);
+    font-weight: 500;
+  }
+
+  .status-segment[data-tone='error'] {
+    color: var(--sev-error);
+  }
+  .status-segment[data-tone='error'] .status-text {
+    font-weight: 600;
+  }
+  .status-segment[data-tone='warning'] {
+    color: var(--sev-warning);
+  }
+  .status-segment[data-tone='warning'] .status-text {
+    font-weight: 600;
+  }
+  .status-segment[data-tone='ok'] .status-text {
+    color: var(--ok);
+    font-weight: 600;
+  }
+  .status-segment[data-tone='pending'] .status-text {
+    color: var(--ink-2);
+  }
+  .status-segment[data-tone='idle'] .status-text {
+    color: var(--ink-3);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
+  }
+
+  .status-segment:last-child {
+    margin-left: auto;
+    border-right: none;
+  }
+
+  /* ----- States ----- */
+  .ed-loading,
+  .ed-error {
+    padding: var(--sp-6);
+    color: var(--ink-3);
+    text-align: center;
+    font-size: var(--fs-14);
+  }
+
+  .ed-error {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+    color: var(--sev-error);
+  }
+
+  .ed-error span {
+    color: var(--ink-3);
+  }
+
+  /* Responsive — collapse the sidebar below 960 px so the canvas stays
+     usable on a small laptop or tablet. The status bar segments wrap. */
+  @media (max-width: 960px) {
+    .ed-body {
+      grid-template-columns: 1fr;
+    }
+
+    .ed-sidebar {
+      max-height: none;
+    }
   }
 </style>

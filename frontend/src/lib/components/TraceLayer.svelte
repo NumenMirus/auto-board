@@ -19,13 +19,16 @@
     onSelect = undefined
   }: Props = $props();
 
-  // Visible stroke widths mirror JumperLayer's lower/upper convention: the
-  // top (component) layer draws solid, the bottom (solder) layer draws
-  // dashed so overlapping copper on the two sides of the board stays
-  // readable at a glance.
-  const STROKE_TOP = 1.2;
-  const STROKE_BOTTOM = 1.2;
-  const DASH_BOTTOM = '3 2';
+  // Top copper is solid and bright; bottom copper is dashed (it runs on
+  // the underside of the board — when the user sees two parallel traces,
+  // the dashed one is on the other side). Computed lazily so the runtime
+  // SCALE is read at template-time, not module-init.
+  function strokeWidth(): number {
+    return 0.55 * SCALE;
+  }
+  function dashBottom(): string {
+    return `${0.7 * SCALE} ${0.4 * SCALE}`;
+  }
 
   function segmentPoints(segment: Trace['segments'][number]): string {
     const start = toSvgPx({ x: segment.start.x, y: segment.start.y });
@@ -34,18 +37,19 @@
   }
 
   function traceColor(trace: Trace): string {
-    if (highlightNetId && trace.netId !== highlightNetId) return '#cccccc';
-    // Stable per-net hash color (same palette family as the backend renderer).
+    if (highlightNetId && trace.netId !== highlightNetId) return '#D6CFBE';
+    // Stable per-net color, palette drawn from the bench wire set + the
+    // table of common 22-AWG silicone jacket colors.
     const palette = [
-      '#1f77b4',
-      '#ff7f0e',
-      '#2ca02c',
-      '#d62728',
-      '#9467bd',
-      '#8c564b',
-      '#e377c2',
-      '#bcbd22',
-      '#17becf'
+      '#1F77B4',
+      '#D6332B',
+      '#2A6E3F',
+      '#7B3FA8',
+      '#C2820F',
+      '#8C564B',
+      '#0E7C8C',
+      '#4F4F4F',
+      '#A23582'
     ];
     let hash = 0;
     for (let i = 0; i < trace.netId.length; i++) {
@@ -87,10 +91,11 @@
           {points}
           fill="none"
           stroke={color}
-          stroke-width={(segment.layer === 'top' ? STROKE_TOP : STROKE_BOTTOM) * SCALE}
-          stroke-dasharray={segment.layer === 'bottom' ? DASH_BOTTOM : undefined}
+          stroke-width={strokeWidth()}
+          stroke-dasharray={segment.layer === 'bottom' ? dashBottom() : undefined}
           stroke-linecap="round"
           stroke-linejoin="round"
+          opacity={dimmed ? 0.35 : 1}
         />
       {/each}
       {#if isSelected}
@@ -99,7 +104,7 @@
           <polyline
             {points}
             fill="none"
-            stroke="var(--color-accent)"
+            stroke="var(--accent-1)"
             stroke-width={0.4 * SCALE}
             stroke-linecap="round"
             stroke-linejoin="round"
@@ -117,7 +122,7 @@
 
   .trace {
     cursor: pointer;
-    transition: opacity 150ms ease-out;
+    transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .trace.dimmed {

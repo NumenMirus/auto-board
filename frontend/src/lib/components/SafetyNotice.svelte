@@ -1,36 +1,62 @@
 <script lang="ts">
-  // No props — this banner is identical on every project page.
+  // Safety notice — kept tight and unobtrusive. The warning sign is
+  // intentionally amber (not red) because breadboard mistakes are
+  // recoverable; red would imply the layout is already dangerous.
 </script>
 
 <aside class="safety-notice" role="note">
-  <span class="icon" aria-hidden="true">⚠</span>
-  <p>
-    La breadboard è destinata a prototipi a bassa tensione e bassa energia.
-    Verificare limiti di corrente, polarità, tensioni e sicurezza prima di
-    alimentare il circuito.
-  </p>
+  <span class="icon" aria-hidden="true">
+    <svg width="14" height="14" viewBox="0 0 14 14">
+      <path
+        d="M7 1.5 L12.5 12 L1.5 12 Z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linejoin="round"
+      />
+      <line x1="7" y1="5.5" x2="7" y2="8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+      <circle cx="7" cy="10.4" r="0.7" fill="currentColor" />
+    </svg>
+  </span>
+  <div>
+    <p class="title">Low-voltage prototyping only</p>
+    <p class="body">
+      Breadboards are for low-voltage, low-energy prototypes. Verify current
+      limits, polarity, and isolation before powering the circuit.
+    </p>
+  </div>
 </aside>
 
 <style>
   .safety-notice {
     display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: rgba(217, 119, 6, 0.1);
-    border-left: 3px solid var(--color-warning);
-    border-radius: var(--radius-sm);
-    color: var(--color-fg);
-    font-size: 12px;
+    align-items: flex-start;
+    gap: 10px;
+    padding: var(--sp-3);
+    background: var(--sev-warning-soft);
+    border: 1px solid var(--sev-warning-line);
+    border-radius: var(--r-2);
+    color: var(--ink-1);
+    font-size: var(--fs-12);
+    line-height: 1.4;
   }
 
   .icon {
-    font-size: 16px;
-    color: var(--color-warning);
+    color: var(--sev-warning);
+    flex-shrink: 0;
+    margin-top: 2px;
   }
 
-  p {
+  .title {
     margin: 0;
-    line-height: 1.4;
+    font-weight: 600;
+    color: var(--sev-warning);
+    font-size: var(--fs-12);
+  }
+
+  .body {
+    margin: 2px 0 0;
+    color: var(--ink-2);
+    font-size: var(--fs-11);
   }
 </style>

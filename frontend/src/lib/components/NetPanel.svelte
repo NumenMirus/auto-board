@@ -16,8 +16,6 @@
     onChangePriority = undefined
   }: Props = $props();
 
-  // All nine enum values from the wire model. Order matches the Python
-  // NetClass enum so changes are diffable across runs.
   const NET_CLASSES: NetClass[] = [
     'ground',
     'power',
@@ -29,6 +27,46 @@
     'low-priority',
     'custom'
   ];
+
+  // Wire color comes from the net class — ground is dark, power is
+  // regulated red, everything else is the spec's blue palette. We expose
+  // the actual hex so the user can tell at a glance which jumper belongs
+  // to which net.
+  function classSwatch(cls: NetClass): string {
+    switch (cls) {
+      case 'ground':
+        return 'var(--wire-gnd)';
+      case 'power':
+        return 'var(--wire-vcc)';
+      case 'high-current':
+        return '#C2820F';
+      case 'analog-sensitive':
+        return '#7B3FA8';
+      case 'clock':
+        return '#0E7C8C';
+      case 'switching':
+        return '#D6332B';
+      case 'digital':
+        return '#1F77B4';
+      case 'low-priority':
+        return '#9A9384';
+      case 'custom':
+        return '#4F4F4F';
+    }
+  }
+
+  function classLabel(cls: NetClass): string {
+    switch (cls) {
+      case 'analog-sensitive':
+        return 'analog';
+      case 'high-current':
+        return 'hi-current';
+      case 'low-priority':
+        return 'low-prio';
+      default:
+        return cls;
+    }
+  }
 </script>
 
 <section class="net-panel" aria-label="Nets">
@@ -44,15 +82,18 @@
             class="net-button"
             onclick={() => onSelectNet?.(selectedNetId === net.id ? null : net.id)}
             aria-pressed={isSelected}
+            title={`Highlight ${net.name} on the board`}
           >
+            <span class="swatch" style:background={classSwatch(net.netClass)} aria-hidden="true"></span>
             <span class="net-name">{net.name}</span>
-            <span class="net-meta">
+            <span class="net-meta mono">
               {net.pins.length} pin{net.pins.length === 1 ? '' : 's'}
             </span>
           </button>
           <div class="net-controls">
-            <label>
-              <span class="visually-hidden">Class</span>
+            <label class="cls-control">
+              <span class="sr-only">Class</span>
+              <span class="cls-swatch" style:background={classSwatch(net.netClass)} aria-hidden="true"></span>
               <select
                 value={net.netClass}
                 onchange={(e) => {
@@ -60,14 +101,15 @@
                   onChangeNetClass?.(net.id, v);
                 }}
                 onclick={(e) => e.stopPropagation()}
+                aria-label={`Class for ${net.name}`}
               >
                 {#each NET_CLASSES as cls (cls)}
-                  <option value={cls}>{cls}</option>
+                  <option value={cls}>{classLabel(cls)}</option>
                 {/each}
               </select>
             </label>
-            <label>
-              <span class="visually-hidden">Priority</span>
+            <label class="pri-control">
+              <span class="sr-only">Priority</span>
               <input
                 type="number"
                 value={net.priority}
@@ -78,6 +120,7 @@
                 onclick={(e) => e.stopPropagation()}
                 step="1"
                 min="0"
+                aria-label={`Priority for ${net.name}`}
               />
             </label>
           </div>
@@ -89,12 +132,14 @@
 
 <style>
   .net-panel {
-    font-size: 13px;
+    font-size: var(--fs-12);
   }
 
   .empty {
-    color: var(--color-muted);
+    color: var(--ink-3);
     font-style: italic;
+    padding: var(--sp-3);
+    margin: 0;
   }
 
   ul {
@@ -106,57 +151,112 @@
   .net-row {
     display: flex;
     align-items: stretch;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--paper-edge);
+    transition: background-color 120ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .net-row:last-child {
+    border-bottom: none;
   }
 
   .net-row.selected {
-    background: rgba(31, 111, 235, 0.08);
+    background: var(--accent-soft);
+  }
+
+  .net-row.selected .net-name {
+    color: var(--accent-1);
   }
 
   .net-button {
     flex: 1;
     display: flex;
-    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
     background: transparent;
     border: none;
-    padding: var(--space-2);
+    padding: 8px 12px;
     text-align: left;
     cursor: pointer;
     color: inherit;
+    transition: background-color 120ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .net-button:hover {
-    background: var(--color-surface);
+    background: var(--paper-2);
+  }
+
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: inset 0 0 0 1px rgba(24, 23, 21, 0.18);
   }
 
   .net-name {
     font-weight: 500;
+    color: var(--ink-1);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .net-meta {
-    color: var(--color-muted);
-    font-size: 11px;
-    align-self: center;
+    color: var(--ink-3);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .net-controls {
     display: flex;
-    gap: var(--space-1);
     align-items: center;
-    padding: 0 var(--space-2);
+    gap: 4px;
+    padding: 0 8px 0 0;
+  }
+
+  .cls-control,
+  .pri-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .cls-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgba(24, 23, 21, 0.18);
   }
 
   .net-controls select,
   .net-controls input {
-    font-size: 12px;
     padding: 2px 4px;
+    font-size: 11px;
+    border: 1px solid var(--paper-edge);
+    border-radius: 3px;
+    background: var(--paper-0);
+    color: var(--ink-1);
+    min-width: 0;
+  }
+
+  .net-controls select:focus,
+  .net-controls input:focus {
+    outline: none;
+    border-color: var(--accent-1);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+
+  .net-controls select {
+    width: 86px;
   }
 
   .net-controls input {
-    width: 4em;
+    width: 48px;
   }
 
-  .visually-hidden {
+  .sr-only {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -164,6 +264,7 @@
     padding: 0;
     overflow: hidden;
     clip: rect(0 0 0 0);
+    white-space: nowrap;
     border: 0;
   }
 </style>
