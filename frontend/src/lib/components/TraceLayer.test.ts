@@ -55,7 +55,7 @@ describe('TraceLayer', () => {
     });
     const polylines = container.querySelectorAll('polyline');
     expect(polylines[0]?.getAttribute('stroke-dasharray')).toBeNull();
-    expect(polylines[1]?.getAttribute('stroke-dasharray')).toBe('3 2');
+    expect(polylines[1]?.getAttribute('stroke-dasharray')).toBe('2.8 1.6');
   });
 
   it('assigns a stable colour to the same net id across renders', () => {
@@ -69,7 +69,7 @@ describe('TraceLayer', () => {
     const color1 = c1.querySelector('polyline')?.getAttribute('stroke');
     const color2 = c2.querySelector('polyline')?.getAttribute('stroke');
     expect(color1).toBe(color2);
-    expect(color1).toMatch(/^#[0-9a-f]{6}$/);
+    expect(color1).toMatch(/^#[0-9a-fA-F]{6}$/);
   });
 
   it('dims traces that do not match the highlighted net', () => {

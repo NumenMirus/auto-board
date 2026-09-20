@@ -1,6 +1,5 @@
 <script lang="ts">
   import {
-    apiFetch,
     createJob,
     validateLayout,
     ApiError
@@ -17,9 +16,6 @@
   import { projectStore } from '$lib/state/project.svelte';
   import { debounce } from '$lib/debounce';
   import type {
-    AnyBoardModel,
-    BoardKind,
-    BreadboardFootprint,
     Diagnostic,
     Layout,
     LayoutScore,
@@ -34,14 +30,6 @@
     params: { id: string };
   }
   let { params }: PageProps = $props();
-
-  interface ProjectEnvelope {
-    id: string;
-    name: string;
-    boardModelId: string;
-    draftVersion: number;
-    document: ProjectDocument;
-  }
 
   let loadError = $state<string | null>(null);
   let isLoading = $state(true);

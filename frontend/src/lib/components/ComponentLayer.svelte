@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AnyBoardModel, BreadboardFootprint, ComponentPlacement } from '../types';
+  import type { AnyBoardModel, ComponentPlacement } from '../types';
   import type { Point2D } from '../geometry';
 
   type Props = {
@@ -32,26 +32,6 @@
       if (h) out.push({ x: h.point.x, y: h.point.y });
     }
     return out;
-  }
-
-  // Returns the component's footprint (via projectStore.footprints) so we
-  // can render the right shape — DIP package vs. axial resistor vs. radial
-  // cap vs. LED — instead of an undifferentiated rectangle.
-  function getFootprint(p: ComponentPlacement): BreadboardFootprint | undefined {
-    // The editor passes the document through the canvas, but the canvas
-    // itself doesn't know which Component each placement belongs to.
-    // We receive placements; the ref is the lookup key.
-    const doc = (typeof window !== 'undefined' &&
-      (window as unknown as { __projectStore__?: unknown }).__projectStore__) as
-      | { footprints?: Record<string, BreadboardFootprint> }
-      | undefined;
-    if (doc?.footprints) {
-      // Look up by componentRef -> footprintId requires the document; we
-      // don't have it here. So fall back to shape heuristics based on
-      // occupied hole count (cheap and accurate enough for visual IDs).
-      return undefined;
-    }
-    return undefined;
   }
 
   // Heuristic shape classification based on how many lattice cells the
@@ -130,7 +110,6 @@
   // Pin-1 indicator: a small notch on the lower-left of a DIP body's
   // rendered rectangle. Computed in SVG space.
   function dipNotch(minX: number, minY: number, maxX: number, maxY: number): string {
-    const cx = (minX + maxX) / 2;
     const notchR = Math.min(maxX - minX, maxY - minY) * 0.12;
     const x = minX + (maxX - minX) * 0.18;
     const y = minY + (maxY - minY) * 0.18;

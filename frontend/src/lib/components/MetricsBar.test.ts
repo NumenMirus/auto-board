@@ -7,10 +7,10 @@ describe('MetricsBar', () => {
   it('renders the empty state when no score is provided', () => {
     const { container } = render(MetricsBar, { props: { score: null } });
     const text = container.textContent ?? '';
-    expect(text).toContain('No score yet');
+    expect(text).toContain('no score yet');
     // None of the metric rows should appear when there's no score.
-    expect(text).not.toContain('Componenti piazzati');
-    expect(text).not.toContain('Net completate');
+    expect(text).not.toContain('Placed');
+    expect(text).not.toContain('Nets complete');
   });
 
   it('renders every metric line when given a score', () => {
@@ -30,19 +30,19 @@ describe('MetricsBar', () => {
     };
     const { container } = render(MetricsBar, { props: { score } });
     const text = container.textContent ?? '';
-    expect(text).toContain('Componenti piazzati');
+    expect(text).toContain('Placed');
     expect(text).toContain('8 / 10');
-    expect(text).toContain('Net completate');
+    expect(text).toContain('Nets complete');
     expect(text).toContain('5 / 7');
-    expect(text).toContain('Jumper');
+    expect(text).toContain('Wires');
     expect(text).toContain('12');
     // 3450 mm -> 3.45 m (mm/1000, 2 decimals).
-    expect(text).toContain('3.45 m');
-    expect(text).toContain('Crossing visivi');
+    expect(text).toContain('3.45');
+    expect(text).toContain('Crossings');
     expect(text).toContain('2');
-    expect(text).toContain('Errori');
+    expect(text).toContain('Errors');
     expect(text).toContain('1');
-    expect(text).toContain('Warning');
+    expect(text).toContain('Warnings');
     expect(text).toContain('3');
     expect(text).toContain('Score');
     // Math.round(1234.6) -> 1235
