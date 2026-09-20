@@ -15,6 +15,7 @@ from app.db.session import get_session
 from app.domain.boards.registry import BUILTIN_BOARDS, get_board_model
 from app.domain.errors import InvalidInput
 from app.domain.footprints.registry import FOOTPRINTS
+from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS
 from app.repositories import boards as boards_repo
 
 __all__ = ["bp"]
@@ -35,7 +36,7 @@ def _board_summary(board_id: str) -> dict[str, object]:
 
 @bp.get("/board-models")
 async def list_board_models(_: Request) -> HTTPResponse:
-    """List every known board model with its id, version and metadata."""
+    """List every known board model with its id, version, kind and metadata."""
     async with get_session() as session:
         rows = await boards_repo.list_board_models(session)
     # Prefer the database view when seeded; fall back to the built-in registry.
@@ -47,6 +48,7 @@ async def list_board_models(_: Request) -> HTTPResponse:
                 {
                     "id": row.id,
                     "version": row.version,
+                    "kind": row.kind,
                     "metadata": definition.get("metadata", {}),
                 }
             )
@@ -66,11 +68,32 @@ async def get_board(_: Request, board_id: str) -> HTTPResponse:
     async with get_session() as session:
         row = await boards_repo.get_board_model(session, board_id)
     if row is not None:
-        return json(row.definition, status=200)
-    return json(board.model_dump(by_alias=True), status=200)
+        definition = dict(row.definition)
+        definition["kind"] = row.kind
+        return json(definition, status=200)
+    dumped = dict(board.model_dump(by_alias=True))
+    from app.domain.models import PerfboardModel
+
+    dumped["kind"] = "perfboard" if isinstance(board, PerfboardModel) else "breadboard"
+    return json(dumped, status=200)
 
 
 @bp.get("/footprints")
-async def list_footprints(_: Request) -> HTTPResponse:
-    """List every registered footprint."""
-    return json([fp.model_dump(by_alias=True) for fp in FOOTPRINTS.values()], status=200)
+async def list_footprints(request: Request) -> HTTPResponse:
+    """List every registered footprint.
+
+    Optional ``?kind=perfboard`` filter returns the perfboard footprint family
+    (no center-gap / rail rules); ``kind=breadboard`` (default) returns the
+    breadboard family. Without the query param, both families are returned.
+    """
+    kind = request.args.get("kind")
+    if kind == "breadboard":
+        fps = FOOTPRINTS
+    elif kind == "perfboard":
+        fps = PERFBOARD_FOOTPRINTS
+    elif kind is None:
+        # Concatenate both registries, breadboard first for stable ordering.
+        fps = {**FOOTPRINTS, **PERFBOARD_FOOTPRINTS}
+    else:
+        raise AppError("VALIDATION_ERROR", f"unknown footprint kind {kind!r}", status=422)
+    return json([fp.model_dump(by_alias=True) for fp in fps.values()], status=200)

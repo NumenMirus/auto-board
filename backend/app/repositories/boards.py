@@ -29,17 +29,20 @@ async def upsert_board_model(
     version: int,
     definition: dict[str, Any],
     builtin: bool,
+    *,
+    kind: str = "breadboard",
 ) -> BoardModelRow:
     """Insert-or-update a board row keyed by ``id``.
 
-    On conflict, ``version`` and ``definition`` are refreshed and ``builtin``
-    is set to the new value so a previously user-imported board can be
-    re-promoted to builtin when the seed script picks it up.
+    On conflict, ``version``, ``definition`` and ``kind`` are refreshed and
+    ``builtin`` is set to the new value so a previously user-imported board
+    can be re-promoted to builtin when the seed script picks it up.
     """
     stmt = pg_insert(BoardModelRow).values(
         id=id,
         version=version,
         definition=definition,
+        kind=kind,
         builtin=builtin,
     )
     stmt = stmt.on_conflict_do_update(
@@ -47,6 +50,7 @@ async def upsert_board_model(
         set_={
             "version": stmt.excluded.version,
             "definition": stmt.excluded.definition,
+            "kind": stmt.excluded.kind,
             "builtin": stmt.excluded.builtin,
         },
     )

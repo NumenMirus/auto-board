@@ -38,10 +38,14 @@ from app.domain.boards.registry import get_board_model
 from app.domain.errors import DomainError, SolverCancelled, SolverTimeout
 from app.domain.footprints.registry import FOOTPRINTS
 from app.domain.index import BoardIndex
+from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS
+from app.domain.traces.solve import solve as trace_solve
 from app.domain.models import (
     BreadboardModel,
     Component,
     Layout,
+    PerfboardModel,
+    TraceLayout,
     Net,
     ProjectDocument,
     SolverOptions,

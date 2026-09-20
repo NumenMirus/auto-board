@@ -1,0 +1,207 @@
+"""Tests for `app.domain.traces` — maze router, route driver, validator, score."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.domain.boards.registry import get_board_model
+from app.domain.diagnostics import DIAGNOSTIC_CATALOG
+from app.domain.models import (
+    Component,
+    ComponentPlacement,
+    Net,
+    PerfboardModel,
+    PinRef,
+    Point,
+    SolverOptions,
+    Trace,
+    TraceLayout,
+    TraceSegment,
+    Via,
+)
+from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS
+from app.domain.traces import maze
+from app.domain.traces.cost import trace_cost
+from app.domain.traces.route import route as route_traces
+from app.domain.traces.score import score_layout
+from app.domain.traces.solve import solve as solve_traces
+from app.domain.traces.validate import validate_layout
+
+
+pytest_plugins: list[str] = []
+
+
+def _placement(ref: str, anchor: str, pin_holes: dict[str, str]) -> ComponentPlacement:
+    return ComponentPlacement(
+        component_ref=ref,
+        anchor_hole_id=anchor,
+        orientation=0,
+        span=None,
+        pin_holes=pin_holes,
+        occupied_hole_ids=list(pin_holes.values()),
+        locked=False,
+    )
+
+
+def test_maze_graph_node_and_edge_counts() -> None:
+    g = maze.build_maze(rows=3, cols=3, pitch_mm=2.54, double_sided=False)
+    assert len(g.nodes) == 9
+    # corner 1-1 has 2 neighbours; edge 1-2 has 3 neighbours; centre 2-2 has 4
+    assert len(g.edges_top["1-1"]) == 2
+    assert len(g.edges_top["1-2"]) == 3
+    assert len(g.edges_top["2-2"]) == 4
+    # Single-sided boards must not let the router switch layers
+    assert not g.double_sided
+
+
+def test_maze_route_straight_line_single_sided() -> None:
+    g = maze.build_maze(rows=5, cols=5, pitch_mm=2.54, double_sided=False)
+    r = maze.maze_route(g, "1-1", "1-5")
+    assert r is not None
+    assert r.path[0] == "1-1" and r.path[-1] == "1-5"
+    assert len(r.path) == 5  # 1-1, 1-2, 1-3, 1-4, 1-5
+    assert r.vias == []
+
+
+def test_maze_route_double_sided_avoids_unnecessary_vias() -> None:
+    g = maze.build_maze(rows=5, cols=5, pitch_mm=2.54, double_sided=True)
+    r = maze.maze_route(g, "1-1", "1-5")
+    # A direct horizontal run is cheaper than going around and through a via
+    assert r is not None
+    assert r.vias == []
+
+
+def test_maze_route_double_sided_with_blocked_edges_uses_via() -> None:
+    g = maze.build_maze(rows=3, cols=3, pitch_mm=2.54, double_sided=True)
+    # Block the direct top neighbours of 1-1 so the maze must drop to bottom via
+    # a via at 1-1 itself, traverse bottom to a node that still has a top edge,
+    # then come back up — net effect: at least one via on the route.
+    forbidden = {
+        ("1-1", "1-2", "top"),
+        ("1-1", "2-1", "top"),
+    }
+    r = maze.maze_route(g, "1-1", "1-3", forbidden_edges=forbidden)
+    assert r is not None
+    assert len(r.vias) >= 1
+
+
+def test_maze_route_unknown_node_returns_none() -> None:
+    g = maze.build_maze(rows=3, cols=3, pitch_mm=2.54, double_sided=False)
+    assert maze.maze_route(g, "1-1", "99-99") is None
+    assert maze.maze_route(g, "99-99", "1-1") is None
+
+
+def test_route_driver_produces_trace_for_two_terminal_net() -> None:
+    g = maze.build_maze(rows=10, cols=10, pitch_mm=2.54, double_sided=True)
+    placements = [_placement("R1", "2-2", {"1": "2-2", "2": "2-5"})]
+    components = [Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])]
+    nets = [Net(id="N1", name="SIG", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")], net_class="digital", priority=5, constraints=[])]
+    res = route_traces(placements=placements, components=components, footprints=PERFBOARD_FOOTPRINTS, nets=nets, graph=g)
+    assert res.unrouted_nets == []
+    assert len(res.layout.traces) == 1
+    assert res.layout.traces[0].net_id == "N1"
+    # 3 segments (2-2 → 2-3 → 2-4 → 2-5)
+    assert len(res.layout.traces[0].segments) == 3
+
+
+def test_route_driver_unrouted_terminal_for_single_pin_net() -> None:
+    """A net with only one valid terminal cannot be routed — it has fewer
+    than 2 holes in the maze, so it shows up in ``unrouted_nets``.
+    """
+    g = maze.build_maze(rows=4, cols=4, pitch_mm=2.54, double_sided=False)
+    placements = [_placement("R1", "1-1", {"1": "1-1"})]  # only one pin placed
+    components = [Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])]
+    nets = [Net(id="N1", name="SIG", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")], net_class="digital", priority=5, constraints=[])]
+    res = route_traces(placements=placements, components=components, footprints=PERFBOARD_FOOTPRINTS, nets=nets, graph=g)
+    assert "N1" in res.unrouted_nets
+
+
+def test_trace_cost_length_only_with_default_weights() -> None:
+    t = Trace(
+        id="T1",
+        net_id="N1",
+        segments=[],
+        estimated_length_mm=12.5,
+        width_mm=0.4,
+        vias=[Via(point=Point(x=0.0, y=0.0))],
+    )
+    assert trace_cost(t) == pytest.approx(12.5 + 5.0)
+
+
+def test_score_layout_computes_jumper_count_and_total_length() -> None:
+    placements = [_placement("R1", "2-2", {"1": "2-2", "2": "2-5"})]
+    layout = TraceLayout(
+        board_id="strip-20x30-double",
+        placements=placements,
+        traces=[
+            Trace(
+                id="T1",
+                net_id="N1",
+                segments=[TraceSegment(start=Point(x=2.54, y=2.54), end=Point(x=7.62, y=2.54), layer="top")],
+                estimated_length_mm=10.0,
+            ),
+        ],
+    )
+    score = score_layout(placements=placements, components_placed=1, components_total=1, layout=layout)
+    assert score.jumper_count == 1
+    assert score.total_jumper_length_mm == pytest.approx(10.0)
+    assert score.routing_cost == pytest.approx(10.0)
+
+
+def test_validate_layout_emits_unrouted_terminal() -> None:
+    board = get_board_model("strip-20x30-double")
+    assert isinstance(board, PerfboardModel)
+    placements = [_placement("R1", "2-2", {"1": "2-2", "2": "2-5"})]
+    components = [Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])]
+    nets = [Net(id="N1", name="SIG", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")], net_class="digital", priority=5, constraints=[])]
+    # No traces routed → validator must emit UNROUTED_TERMINAL
+    layout = TraceLayout(board_id=board.id, placements=placements)
+    result = validate_layout(board, PERFBOARD_FOOTPRINTS, components, nets, layout)
+    codes = {d.code for d in result.diagnostics}
+    assert "UNROUTED_TERMINAL" in codes
+
+
+def test_validate_layout_no_diagnostics_on_clean_layout() -> None:
+    board = get_board_model("strip-20x30-double")
+    placements = [_placement("R1", "2-2", {"1": "2-2", "2": "2-5"})]
+    components = [Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[])]
+    nets = [Net(id="N1", name="SIG", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R1", pin="2")], net_class="digital", priority=5, constraints=[])]
+    layout = TraceLayout(
+        board_id=board.id,
+        placements=placements,
+        traces=[
+            Trace(
+                id="T1",
+                net_id="N1",
+                segments=[TraceSegment(start=Point(x=2.54, y=2.54), end=Point(x=7.62, y=2.54), layer="top")],
+                estimated_length_mm=10.0,
+            ),
+        ],
+    )
+    result = validate_layout(board, PERFBOARD_FOOTPRINTS, components, nets, layout)
+    assert result.diagnostics == []
+
+
+def test_diagnostic_catalog_has_new_codes() -> None:
+    assert "UNROUTED_TERMINAL" in DIAGNOSTIC_CATALOG
+    assert "TRACE_CROSSING_UNAVOIDABLE" in DIAGNOSTIC_CATALOG
+
+
+def test_solve_pipeline_end_to_end() -> None:
+    board = get_board_model("strip-20x30-double")
+    placements = [
+        _placement("R1", "2-2", {"1": "2-2", "2": "2-5"}),
+        _placement("R2", "4-2", {"1": "4-2", "2": "4-5"}),
+    ]
+    components = [
+        Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+        Component(ref="R2", value="4k7", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+    ]
+    nets = [
+        Net(id="GND", name="GND", pins=[PinRef(component_ref="R1", pin="1"), PinRef(component_ref="R2", pin="2")], net_class="ground", priority=10, constraints=[]),
+        Net(id="SIG", name="SIG", pins=[PinRef(component_ref="R1", pin="2"), PinRef(component_ref="R2", pin="1")], net_class="digital", priority=5, constraints=[]),
+    ]
+    initial_layout = TraceLayout(board_id=board.id, placements=placements)
+    res = solve_traces(board=board, footprints=PERFBOARD_FOOTPRINTS, components=components, nets=nets, options=SolverOptions(), initial_layout=initial_layout)
+    assert res.score.error_count == 0
+    assert len(res.layout.traces) == 2

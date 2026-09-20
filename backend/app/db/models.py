@@ -162,7 +162,7 @@ class SolverJob(Base):
     __tablename__ = "solver_jobs"
     __table_args__ = (
         CheckConstraint(
-            "operation IN ('place','route','solve','optimize','validate','export')",
+            "operation IN ('place','route','solve','optimize','validate','export','trace-route','trace-solve')",
             name="ck_solver_jobs_operation_allowed",
         ),
         CheckConstraint(
@@ -288,7 +288,9 @@ class BoardModelRow(Base):
 
     Built-in boards are upserted by the seed script at every deployment; the
     ``builtin`` flag lets the application distinguish seeded rows from
-    user-imported ones.
+    user-imported ones. ``kind`` discriminates the board family
+    (``"breadboard"`` or ``"perfboard"``) so the API can return the right
+    schema and the solver can dispatch on it.
     """
 
     __tablename__ = "board_models"
@@ -296,6 +298,9 @@ class BoardModelRow(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     definition: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    kind: Mapped[str] = mapped_column(
+        Text, nullable=False, default="breadboard", server_default=text("'breadboard'")
+    )
     builtin: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )

@@ -101,8 +101,8 @@ def build_maze(rows: int, cols: int, pitch_mm: float, double_sided: bool) -> Maz
             if not (1 <= nr <= rows and 1 <= nc <= cols):
                 continue
             other_id = f"{nr}-{nc}"
-            for layer_dict in (edges_top, edges_bottom):
-                layer_dict[hid].append(MazeEdge(a=hid, b=other_id, layer="top", length_mm=pitch_mm))
+            edges_top[hid].append(MazeEdge(a=hid, b=other_id, layer="top", length_mm=pitch_mm))
+            edges_bottom[hid].append(MazeEdge(a=hid, b=other_id, layer="bottom", length_mm=pitch_mm))
 
     return MazeGraph(
         nodes=nodes,
