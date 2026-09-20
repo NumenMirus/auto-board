@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    apiFetch,
     createJob,
     validateLayout,
     ApiError
@@ -16,6 +17,9 @@
   import { projectStore } from '$lib/state/project.svelte';
   import { debounce } from '$lib/debounce';
   import type {
+    AnyBoardModel,
+    BoardKind,
+    BreadboardFootprint,
     Diagnostic,
     Layout,
     LayoutScore,
@@ -31,6 +35,16 @@
   }
   let { params }: PageProps = $props();
 
+  interface ProjectEnvelope {
+    id: string;
+    name: string;
+    boardModelId: string;
+    draftVersion: number;
+    document: ProjectDocument;
+    createdAt: string;
+    updatedAt: string;
+  }
+
   let loadError = $state<string | null>(null);
   let isLoading = $state(true);
   let validatingNow = $state(false);
@@ -39,45 +53,45 @@
   let selectedNetId = $state<string | null>(null);
   let lastResultLayoutId = $state<string | null>(null);
 
-  // $effect(() => {
-  //   const id = params.id;
-  //   let cancelled = false;
+  $effect(() => {
+    const id = params.id;
+    let cancelled = false;
 
-  //   async function load(): Promise<void> {
-  //     isLoading = true;
-  //     loadError = null;
-  //     try {
-  //       const envelope = await apiFetch<ProjectEnvelope>(`/projects/${id}`);
-  //       if (cancelled) return;
-  //       const [board, footprintsList] = await Promise.all([
-  //         apiFetch<AnyBoardModel & { kind: BoardKind }>(`/board-models/${envelope.boardModelId}`),
-  //         apiFetch<BreadboardFootprint[]>('/footprints')
-  //       ]);
-  //       if (cancelled) return;
-  //       const footprints: Record<string, BreadboardFootprint> = {};
-  //       for (const fp of footprintsList) footprints[fp.id] = fp;
+    async function load(): Promise<void> {
+      isLoading = true;
+      loadError = null;
+      try {
+        const envelope = await apiFetch<ProjectEnvelope>(`/projects/${id}`);
+        if (cancelled) return;
+        const [board, footprintsList] = await Promise.all([
+          apiFetch<AnyBoardModel & { kind: BoardKind }>(`/board-models/${envelope.boardModelId}`),
+          apiFetch<BreadboardFootprint[]>('/footprints')
+        ]);
+        if (cancelled) return;
+        const footprints: Record<string, BreadboardFootprint> = {};
+        for (const fp of footprintsList) footprints[fp.id] = fp;
 
-  //       projectStore.document = envelope.document;
-  //       projectStore.board = board;
-  //       projectStore.boardKind = board.kind;
-  //       projectStore.footprints = footprints;
-  //       projectStore.traceLayout = null;
-  //       if (board.kind === 'breadboard') {
-  //         projectStore.pushUndo(envelope.document.layout);
-  //       }
-  //     } catch (err) {
-  //       if (cancelled) return;
-  //       loadError = err instanceof ApiError ? err.message : 'Failed to load project.';
-  //     } finally {
-  //       if (!cancelled) isLoading = false;
-  //     }
-  //   }
+        projectStore.document = envelope.document;
+        projectStore.board = board;
+        projectStore.boardKind = board.kind;
+        projectStore.footprints = footprints;
+        projectStore.traceLayout = null;
+        if (board.kind === 'breadboard') {
+          projectStore.pushUndo(envelope.document.layout);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        loadError = err instanceof ApiError ? err.message : 'Failed to load project.';
+      } finally {
+        if (!cancelled) isLoading = false;
+      }
+    }
 
-  //   void load();
-  //   return () => {
-  //     cancelled = true;
-  //   };
-  // });
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  });
 
   const runValidate = async (): Promise<void> => {
     const doc = projectStore.document;
