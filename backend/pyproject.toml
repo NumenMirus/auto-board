@@ -1,7 +1,7 @@
 [project]
-name = "autobreadboard"
+name = "autoboard"
 version = "0.1.0"
-description = "AutoBreadboard backend: Sanic API, arq worker, pure Python solver core"
+description = "AutoBoard backend: Sanic API, arq worker, pure Python solver core for breadboard and perfboard"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "sanic[ext]>=25.12,<25.13",

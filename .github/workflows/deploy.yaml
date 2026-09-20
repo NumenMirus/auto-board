@@ -47,9 +47,9 @@ jobs:
         run: |
           case "${{ github.event.inputs.environment }}" in
             staging)
-              VALUES=deploy/helm/autobreadboard/values-staging.yaml ;;
+              VALUES=deploy/helm/autoboard/values-staging.yaml ;;
             production)
-              VALUES=deploy/helm/autobreadboard/values-production.yaml ;;
+              VALUES=deploy/helm/autoboard/values-production.yaml ;;
             *)
               echo "unknown environment ${{ github.event.inputs.environment }}" >&2
               exit 1 ;;
@@ -57,23 +57,23 @@ jobs:
           echo "values=$VALUES" >> "$GITHUB_OUTPUT"
       - name: Helm upgrade --install
         run: |
-          helm upgrade --install autobreadboard deploy/helm/autobreadboard \
-            --namespace autobreadboard --create-namespace \
+          helm upgrade --install autoboard deploy/helm/autoboard \
+            --namespace autoboard --create-namespace \
             --values "${{ steps.select.outputs.values }}" \
             --set api.image.tag=${{ github.event.inputs.image_tag }} \
             --set worker.image.tag=${{ github.event.inputs.image_tag }} \
             --set frontend.image.tag=${{ github.event.inputs.image_tag }} \
             --wait --timeout 10m
       - name: Rollout status — api
-        run: kubectl rollout status deployment/autobreadboard-api -n autobreadboard --timeout=180s
+        run: kubectl rollout status deployment/autoboard-api -n autoboard --timeout=180s
       - name: Rollout status — worker
-        run: kubectl rollout status deployment/autobreadboard-worker -n autobreadboard --timeout=180s
+        run: kubectl rollout status deployment/autoboard-worker -n autoboard --timeout=180s
       - name: Rollout status — frontend
-        run: kubectl rollout status deployment/autobreadboard-frontend -n autobreadboard --timeout=180s
+        run: kubectl rollout status deployment/autoboard-frontend -n autoboard --timeout=180s
       - name: Smoke test
         run: |
           # Port-forward the API for the duration of the smoke test.
-          kubectl port-forward -n autobreadboard svc/autobreadboard-api 8000:8000 &
+          kubectl port-forward -n autoboard svc/autoboard-api 8000:8000 &
           PF_PID=$!
           trap "kill $PF_PID" EXIT
           # Wait for the port-forward to bind.

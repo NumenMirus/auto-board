@@ -140,7 +140,7 @@ jobs:
           context: backend
           file: backend/Dockerfile
           target: runtime
-          tags: autobreadboard-api:ci
+          tags: autoboard-api:ci
           push: false
           load: true
           cache-from: type=gha
@@ -151,7 +151,7 @@ jobs:
           context: frontend
           file: frontend/Dockerfile
           target: runtime
-          tags: autobreadboard-frontend:ci
+          tags: autoboard-frontend:ci
           push: false
           load: true
           cache-from: type=gha
@@ -159,7 +159,7 @@ jobs:
       - name: Trivy scan — backend image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: autobreadboard-api:ci
+          image-ref: autoboard-api:ci
           format: table
           exit-code: "0"
           severity: CRITICAL,HIGH
@@ -170,7 +170,7 @@ jobs:
       - name: Trivy scan — frontend image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: autobreadboard-frontend:ci
+          image-ref: autoboard-frontend:ci
           format: table
           exit-code: "0"
           severity: CRITICAL,HIGH
@@ -180,19 +180,19 @@ jobs:
         with:
           version: v3.19.0
       - name: Helm lint
-        run: helm lint deploy/helm/autobreadboard
+        run: helm lint deploy/helm/autoboard
       - name: Helm template (all values) + kubeconform
         env:
           KUBECONFORM_VERSION: latest-alpine
         run: |
           set -euo pipefail
           for values in \
-              deploy/helm/autobreadboard/values.yaml \
-              deploy/helm/autobreadboard/values-dev.yaml \
-              deploy/helm/autobreadboard/values-staging.yaml \
-              deploy/helm/autobreadboard/values-production.yaml; do
+              deploy/helm/autoboard/values.yaml \
+              deploy/helm/autoboard/values-dev.yaml \
+              deploy/helm/autoboard/values-staging.yaml \
+              deploy/helm/autoboard/values-production.yaml; do
             echo "::group::helm template ${values}"
-            helm template autobreadboard deploy/helm/autobreadboard --values "${values}" \
+            helm template autoboard deploy/helm/autoboard --values "${values}" \
               | docker run --rm -i ghcr.io/yannh/kubeconform:latest-alpine \
                   -strict -summary -ignore-missing-schemas -verbose
             echo "::endgroup::"

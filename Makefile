@@ -1,4 +1,4 @@
-# AutoBreadboard top-level Makefile. All targets are thin wrappers around the
+# AutoBoard top-level Makefile. All targets are thin wrappers around the
 # scripts under scripts/ so the underlying logic stays shell-portable and
 # trivially reproducible in CI without `make`.
 
@@ -17,7 +17,7 @@ COMPOSE := docker compose -f $(ROOT_DIR)/infra/docker-compose.yml
         helm-lint k8s-kind-up k8s-deploy k8s-smoke update-golden build-images
 
 help: ## Show this help.
-	@printf 'AutoBreadboard — common targets:\n'
+	@printf 'AutoBoard — common targets:\n'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	    awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
@@ -97,17 +97,17 @@ k8s-kind-up: ## Create a kind cluster per deploy/local/kind-cluster.yaml (needs 
 	fi
 	@$(KIND) create cluster --config $(ROOT_DIR)/deploy/local/kind-cluster.yaml
 
-k8s-deploy: ## helm upgrade --install the dev values into the autobreadboard namespace.
-	@if [ ! -d $(ROOT_DIR)/deploy/helm/autobreadboard ]; then \
-	    echo "k8s-deploy: deploy/helm/autobreadboard not present yet (later wave)" >&2; \
+k8s-deploy: ## helm upgrade --install the dev values into the autoboard namespace.
+	@if [ ! -d $(ROOT_DIR)/deploy/helm/autoboard ]; then \
+	    echo "k8s-deploy: deploy/helm/autoboard not present yet (later wave)" >&2; \
 	    exit 1; \
 	fi
-	@if [ ! -f $(ROOT_DIR)/deploy/helm/autobreadboard/values-dev.yaml ]; then \
+	@if [ ! -f $(ROOT_DIR)/deploy/helm/autoboard/values-dev.yaml ]; then \
 	    echo "k8s-deploy: values-dev.yaml missing" >&2; exit 1; \
 	fi
-	@helm upgrade --install autobreadboard $(ROOT_DIR)/deploy/helm/autobreadboard \
-	    --namespace autobreadboard --create-namespace \
-	    --values $(ROOT_DIR)/deploy/helm/autobreadboard/values-dev.yaml
+	@helm upgrade --install autoboard $(ROOT_DIR)/deploy/helm/autoboard \
+	    --namespace autoboard --create-namespace \
+	    --values $(ROOT_DIR)/deploy/helm/autoboard/values-dev.yaml
 
 k8s-smoke: ## Run the smoke test against a port-forwarded k8s service.
 	@$(ROOT_DIR)/scripts/smoke-test.sh "http://localhost:8000"

@@ -1,11 +1,11 @@
-# AutoBreadboard
+# AutoBoard
 
 > **Safety notice** — La breadboard è destinata a prototipi a bassa tensione e
 > bassa energia. Verificare limiti di corrente, polarità, tensioni e sicurezza
-> prima di alimentare il circuito. AutoBreadboard non garantisce che un
+> prima di alimentare il circuito. AutoBoard non garantisce che un
 > circuito sia "sicuro" solo perché la netlist è connessa correttamente.
 
-AutoBreadboard is a web application that turns a through-hole netlist (JSON) into
+AutoBoard is a web application that turns a through-hole netlist (JSON) into
 a verified breadboard layout. It models a real half-size 400-tie-point
 breadboard, auto-places components, routes jumpers, verifies the result
 topologically (DSU), lets the user edit manually with live verification, and
@@ -36,10 +36,10 @@ auto-breadboard/
 │   ├── Dockerfile
 │   └── nginx.conf
 ├── deploy/           # Helm chart + kind/local manifests
-│   ├── helm/autobreadboard/
+│   ├── helm/autoboard/
 │   └── local/
 ├── infra/            # docker-compose.yml for local dev (postgres/redis/minio)
-├── scripts/          # dev.sh, test.sh, build-images.sh, helm-lint.sh, smoke-test.sh
+├── scripts/          # dev.sh, test.sh, build-images    # autoboard-api:local + autoboard-frontend:local
 ├── .github/workflows/  # ci.yaml, build.yaml, deploy.yaml
 ├── Makefile
 └── README.md
@@ -99,7 +99,7 @@ CORS_ORIGINS='["http://localhost:8080"]'
 ### Building the application images
 
 ```sh
-make build-images    # autobreadboard-api:local + autobreadboard-frontend:local
+make build-images    # autoboard-api:local + autoboard-frontend:local
 ```
 
 CI (`.github/workflows/build.yaml`) builds and pushes images tagged by git SHA.
@@ -110,8 +110,8 @@ CI (`.github/workflows/build.yaml`) builds and pushes images tagged by git SHA.
 # Cluster (kind — must be installed)
 make k8s-kind-up
 make k8s-deploy       # helm upgrade --install against values-dev.yaml
-kubectl rollout status deployment/autobreadboard-api -n autobreadboard
-kubectl port-forward svc/autobreadboard-frontend 8080:8080 -n autobreadboard
+kubectl rollout status deployment/autoboard-api -n autoboard
+kubectl port-forward svc/autoboard-frontend 8080:8080 -n autoboard
 make k8s-smoke
 ```
 

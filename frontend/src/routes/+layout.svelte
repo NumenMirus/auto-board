@@ -8,7 +8,7 @@
 
 <div class="app-shell">
   <header class="app-header">
-    <a href="/" class="brand">AutoBreadboard</a>
+    <a href="/" class="brand">AutoBoard</a>
   </header>
   <main class="app-main">
     {@render children()}

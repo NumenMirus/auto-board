@@ -24,11 +24,11 @@ jobs:
           - target: api
             context: backend
             dockerfile: backend/Dockerfile
-            image: autobreadboard-api
+            image: autoboard-api
           - target: frontend
             context: frontend
             dockerfile: frontend/Dockerfile
-            image: autobreadboard-frontend
+            image: autoboard-frontend
     steps:
       - uses: actions/checkout@v4
 

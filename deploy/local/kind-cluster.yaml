@@ -1,4 +1,4 @@
-# Kind cluster configuration for local AutoBreadboard development.
+# Kind cluster configuration for local AutoBoard development.
 # Single control-plane node with hostPort mappings so the ingress-nginx
 # controller can be reached on http://localhost / https://localhost from the
 # host machine (standard kind + ingress-nginx quickstart).
@@ -9,11 +9,11 @@
 #   helm install ingress-nginx ingress-nginx/ingress-nginx \
 #       --namespace ingress-nginx --create-namespace \
 #       --values deploy/local/ingress-values.yaml
-#   make k8s-deploy   # installs AutoBreadboard with values-dev.yaml
+#   make k8s-deploy   # installs AutoBoard with values-dev.yaml
 
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: autobreadboard
+name: autoboard
 nodes:
   - role: control-plane
     kubeadmConfigPatches:

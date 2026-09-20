@@ -539,3 +539,121 @@ class ProjectDocument(WireModel):
     layout: Layout
     settings: ProjectSettings
     footprint_overrides: list[FootprintOverride] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------
+# 4.7 Perfboard (soldered through-hole) — sibling of the breadboard model
+# --------------------------------------------------------------------------
+
+
+class PerfboardMetadata(WireModel):
+    rows: int
+    cols: int
+    layers: int = Field(ge=1, le=2)
+
+
+class PerfboardModel(WireModel):
+    """A uniform grid of isolated holes (stripboard / protoboard).
+
+    All holes are electrically isolated by default; copper traces (added at
+    routing time) join them. There are no rails and no center gap; the only
+    zone is the rectangular board area. Pin offsets and body cells use the
+    same ``(x, y)`` integer-lattice convention as :class:`BreadboardFootprint`.
+    """
+
+    id: str
+    version: Literal[1]
+    pitch_mm: float = 2.54
+    rows: int
+    cols: int
+    layers: int = Field(ge=1, le=2)
+    holes: list[Hole]
+    zones: list[BoardZone] = Field(default_factory=list)
+    metadata: PerfboardMetadata
+
+
+class ThroughHoleFootprint(WireModel):
+    """Through-hole component footprint usable on both breadboard and perfboard.
+
+    For perfboard use the placement-rule set is intentionally smaller than
+    :class:`BreadboardFootprint`: no rail rules and no center-gap straddle.
+    Reuses the same ``pin_offsets`` / ``body_cells`` / ``internal_connections``
+    conventions so a footprint can be shared across both board families.
+    """
+
+    id: str
+    display_name: str
+    pin_offsets: dict[str, RelativeHole]
+    body_cells: list[RelativeHole]
+    supported_orientations: list[Orientation]
+    placement_rules: list[PlacementRule]
+    geometry: FootprintGeometry
+    internal_connections: list[list[str]] = Field(default_factory=list)
+    polarity: dict[str, str] = Field(default_factory=dict)
+
+
+# Back-compat alias — every existing breadboard-side consumer (placement,
+# routing, validation, frontend) imports ``BreadboardFootprint``. The two
+# types are structurally identical today; the alias keeps that import path
+# working without rewriting the breadboard solver code.
+BreadboardFootprint = ThroughHoleFootprint
+
+
+# --------------------------------------------------------------------------
+# 4.8 Perfboard trace routing — copper traces and vias
+# --------------------------------------------------------------------------
+
+
+CopperLayer = Literal["top", "bottom"]
+
+
+class TraceSegment(WireModel):
+    """One straight segment of a copper trace on a single layer.
+
+    ``start`` and ``end`` are board-absolute millimetres. A trace is a list
+    of segments emitted in order; bends happen where one segment ends and
+    the next begins.
+    """
+
+    start: Point
+    end: Point
+    layer: CopperLayer
+    width_mm: float = 0.4
+
+
+class Via(WireModel):
+    """Plated through-hole connecting the top and bottom copper layers.
+
+    Only meaningful when the board is double-sided; single-sided boards
+    must never carry a via.
+    """
+
+    point: Point
+    diameter_mm: float = 0.8
+    drill_mm: float = 0.5
+
+
+class Trace(WireModel):
+    id: str
+    net_id: str
+    segments: list[TraceSegment]
+    vias: list[Via] = Field(default_factory=list)
+    estimated_length_mm: float
+    width_mm: float = 0.4
+    locked: bool = False
+
+
+class TraceLayout(WireModel):
+    """Perfboard layout: placements + copper traces + vias.
+
+    Reuses the breadboard :class:`ComponentPlacement` (the body cells and
+    pin-hole map are identical on a perfboard). Jumpers and manual electrical
+    links do not apply to perfboards.
+    """
+
+    version: Literal[1] = 1
+    board_id: str
+    placements: list[ComponentPlacement]
+    traces: list[Trace] = Field(default_factory=list)
+    vias: list[Via] = Field(default_factory=list)
+
