@@ -1,0 +1,83 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+      image_tag:
+        description: Image tag (e.g. sha-abc123def456)
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  helm-upgrade:
+    name: helm upgrade (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.30.0
+      - name: Write kubeconfig
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p "$HOME/.kube"
+          printf '%s' "$KUBE_CONFIG" > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+      - name: Select values file
+        id: select
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            staging)
+              VALUES=deploy/helm/autobreadboard/values-staging.yaml ;;
+            production)
+              VALUES=deploy/helm/autobreadboard/values-production.yaml ;;
+            *)
+              echo "unknown environment ${{ github.event.inputs.environment }}" >&2
+              exit 1 ;;
+          esac
+          echo "values=$VALUES" >> "$GITHUB_OUTPUT"
+      - name: Helm upgrade --install
+        run: |
+          helm upgrade --install autobreadboard deploy/helm/autobreadboard \
+            --namespace autobreadboard --create-namespace \
+            --values "${{ steps.select.outputs.values }}" \
+            --set api.image.tag=${{ github.event.inputs.image_tag }} \
+            --set worker.image.tag=${{ github.event.inputs.image_tag }} \
+            --set frontend.image.tag=${{ github.event.inputs.image_tag }} \
+            --wait --timeout 10m
+      - name: Rollout status — api
+        run: kubectl rollout status deployment/autobreadboard-api -n autobreadboard --timeout=180s
+      - name: Rollout status — worker
+        run: kubectl rollout status deployment/autobreadboard-worker -n autobreadboard --timeout=180s
+      - name: Rollout status — frontend
+        run: kubectl rollout status deployment/autobreadboard-frontend -n autobreadboard --timeout=180s
+      - name: Smoke test
+        run: |
+          # Port-forward the API for the duration of the smoke test.
+          kubectl port-forward -n autobreadboard svc/autobreadboard-api 8000:8000 &
+          PF_PID=$!
+          trap "kill $PF_PID" EXIT
+          # Wait for the port-forward to bind.
+          for i in $(seq 1 30); do
+            curl -fs http://localhost:8000/healthz && break || sleep 1
+          done
+          ./scripts/smoke-test.sh http://localhost:8000

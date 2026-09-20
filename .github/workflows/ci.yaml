@@ -1,0 +1,199 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs of the same branch on new pushes — saves CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  backend:
+    name: backend (lint + typecheck + tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: autobreadboard
+          POSTGRES_PASSWORD: autobreadboard
+          POSTGRES_DB: autobreadboard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U autobreadboard"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+          - 9001:9001
+        options: >-
+          --health-cmd "curl -fs http://localhost:9000/minio/health/live || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://autobreadboard:autobreadboard@localhost:5432/autobreadboard
+      REDIS_URL: redis://localhost:6379/0
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_BUCKET: autobreadboard
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      ENVIRONMENT: development
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/uv.lock') }}
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --group dev
+      - name: Ruff lint
+        working-directory: backend
+        run: uv run ruff check app tests
+      - name: Ruff format check
+        working-directory: backend
+        run: uv run ruff format --check app tests
+      - name: mypy
+        working-directory: backend
+        run: uv run mypy --strict app
+      - name: Ensure minio bucket exists
+        run: |
+          docker run --rm --network host minio/mc:latest \
+            mb --ignore-existing local/autobreadboard || true
+      - name: Alembic upgrade + seed
+        working-directory: backend
+        run: |
+          uv run alembic upgrade head
+          uv run python -m app.db.seed
+      - name: Pytest
+        working-directory: backend
+        run: uv run pytest tests -q
+
+  frontend:
+    name: frontend (lint + typecheck + tests + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: svelte-kit sync
+        working-directory: frontend
+        run: npx svelte-kit sync
+      - name: eslint
+        working-directory: frontend
+        run: npx eslint .
+      - name: svelte-check
+        working-directory: frontend
+        run: npx svelte-check --tsconfig ./tsconfig.json
+      - name: vitest
+        working-directory: frontend
+        run: npx vitest run
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  deploy:
+    name: deploy (build images + helm render + kubeconform)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build backend image (runtime)
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          target: runtime
+          tags: autobreadboard-api:ci
+          push: false
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build frontend image (runtime)
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          target: runtime
+          tags: autobreadboard-frontend:ci
+          push: false
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Trivy scan — backend image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: autobreadboard-api:ci
+          format: table
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+        # exit-code 0: vulnerabilities are reported in the run log but do not
+        # block CI. Tightening this is a follow-up once the base-image choice
+        # is finalised.
+      - name: Trivy scan — frontend image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: autobreadboard-frontend:ci
+          format: table
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Helm lint
+        run: helm lint deploy/helm/autobreadboard
+      - name: Helm template (all values) + kubeconform
+        env:
+          KUBECONFORM_VERSION: latest-alpine
+        run: |
+          set -euo pipefail
+          for values in \
+              deploy/helm/autobreadboard/values.yaml \
+              deploy/helm/autobreadboard/values-dev.yaml \
+              deploy/helm/autobreadboard/values-staging.yaml \
+              deploy/helm/autobreadboard/values-production.yaml; do
+            echo "::group::helm template ${values}"
+            helm template autobreadboard deploy/helm/autobreadboard --values "${values}" \
+              | docker run --rm -i ghcr.io/yannh/kubeconform:latest-alpine \
+                  -strict -summary -ignore-missing-schemas -verbose
+            echo "::endgroup::"
+          done

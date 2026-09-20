@@ -1,0 +1,218 @@
+# Docker Compose stack for local AutoBreadboard development.
+# Brings up: postgres, redis, minio (+ bucket bootstrap), api, worker, frontend.
+# Migrations + board-model seeding run on-demand under the `tools` profile
+# (`make migrate` / `make seed`).
+#
+# Every service binds to localhost-only ports so the stack is safe to leave
+# running alongside other projects on the same host.
+#
+# Environment variable names mirror `app/settings.py` field names uppercased
+# (per addendum §4.3). pydantic-settings parses `list[str]` from JSON arrays,
+# so CORS_ORIGINS is the JSON literal '["http://localhost:8080"]'.
+
+name: autobreadboard
+
+x-backend-env: &backend-env
+  ENVIRONMENT: development
+  LOG_LEVEL: INFO
+  DATABASE_URL: postgresql+asyncpg://autobreadboard:autobreadboard@postgres:5432/autobreadboard
+  REDIS_URL: redis://redis:6379/0
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_REGION: us-east-1
+  S3_BUCKET: autobreadboard
+  S3_ACCESS_KEY_ID: minioadmin
+  S3_SECRET_ACCESS_KEY: minioadmin
+  S3_USE_PATH_STYLE: "true"
+  API_HOST: 0.0.0.0
+  API_PORT: "8000"
+  CORS_ORIGINS: '["http://localhost:8080"]'
+  TRUSTED_HOSTS: '["localhost","api"]'
+  SOLVER_DEFAULT_TIMEOUT_SECONDS: "60"
+  SOLVER_MAX_TIMEOUT_SECONDS: "600"
+  WORKER_CONCURRENCY: "1"
+  WORKER_METRICS_PORT: "9100"
+  WORKER_HEARTBEAT_PATH: /tmp/worker-heartbeat
+  JOB_LOCK_TTL_SECONDS: "900"
+  EXPORT_RETENTION_DAYS: "7"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: abb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: autobreadboard
+      POSTGRES_PASSWORD: autobreadboard
+      POSTGRES_DB: autobreadboard
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autobreadboard -d autobreadboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:8-alpine
+    container_name: abb-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: abb-minio
+    restart: unless-stopped
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # One-shot idempotent bucket creation. Uses `mc mb --ignore-existing` so
+  # re-running the stack never fails with "bucket already exists".
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: abb-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        mc alias set local http://minio:9000 minioadmin minioadmin
+        mc mb --ignore-existing local/autobreadboard
+        echo "minio-init: bucket autobreadboard ready"
+    restart: "no"
+
+  api:
+    build:
+      context: ../backend
+      target: dev
+    container_name: abb-api
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Hot reload: bind-mount the source tree over /app. .venv is preserved
+      # by mounting an anonymous volume on top of it (the second entry wins).
+      - ../backend:/app
+      - backend-venv:/app/.venv
+      - backend-uv-cache:/root/.cache/uv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      # The Sanic API exposes /healthz (no I/O) — perfect for compose
+      # healthchecks without taxing Postgres/Redis. Neither wget nor curl is
+      # installed in the python:3.12-slim base (and we don't want to add
+      # either just for a healthcheck), so use Python's own stdlib instead.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  worker:
+    build:
+      context: ../backend
+      target: dev
+    container_name: abb-worker
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+    # Worker doesn't expose HTTP; override the image default (which runs the
+    # API) with the arq worker entrypoint. /healthz is still served by the
+    # Python process via `app.worker_probe --ready/--live` (exec probe in k8s).
+    command: ["python", "-m", "app.worker"]
+    ports:
+      # Prometheus metrics scrape target.
+      - "127.0.0.1:9100:9100"
+    volumes:
+      - ../backend:/app
+      - backend-venv:/app/.venv
+      - backend-uv-cache:/root/.cache/uv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../frontend
+      target: dev
+    container_name: abb-frontend
+    restart: unless-stopped
+    ports:
+      # Compose maps host :8080 to container :5173 (vite dev server).
+      - "127.0.0.1:8080:5173"
+    volumes:
+      # Bind-mount the source tree for HMR; the named volume below overrides
+      # /app/node_modules so the host doesn't have to ship one.
+      - ../frontend:/app
+      - frontend-node-modules:/app/node_modules
+    depends_on:
+      - api
+
+  # Migrations + board-model seeding. Off by default — opt in with
+  # `docker compose --profile tools run --rm migrate` or `make migrate`.
+  migrate:
+    build:
+      context: ../backend
+      target: dev
+    container_name: abb-migrate
+    profiles: ["tools"]
+    environment:
+      <<: *backend-env
+    command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed"]
+    volumes:
+      - ../backend:/app
+      - backend-venv:/app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  minio-data:
+  # Anonymous volumes so docker compose reuses them across `up`/`down` cycles
+  # but doesn't accidentally cross-project pollute.
+  backend-venv:
+  backend-uv-cache:
+  frontend-node-modules:

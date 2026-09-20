@@ -1,0 +1,164 @@
+# AutoBreadboard — Helm chart defaults.
+# Mirrors addendum §7.2 verbatim and extends it with the deployment-time
+# knobs this chart actually consumes. `values-dev.yaml`, `values-staging.yaml`
+# and `values-production.yaml` override a subset for each environment.
+
+global:
+  environment: production
+  imagePullSecrets: []
+  buildSha: "unknown"
+  imageTag: "sha-REPLACE"
+
+api:
+  image:
+    repository: ghcr.io/example/autobreadboard-api
+    tag: "sha-REPLACE"
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  terminationGracePeriodSeconds: 40
+  service:
+    port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+worker:
+  image:
+    repository: ghcr.io/example/autobreadboard-api
+    tag: "sha-REPLACE"
+    # pullPolicy falls back to api.image.pullPolicy when unset.
+  replicaCount: 1
+  concurrency: 1
+  metricsPort: 9100
+  heartbeatPath: /tmp/worker-heartbeat
+  terminationGracePeriodSeconds: 120
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+frontend:
+  image:
+    repository: ghcr.io/example/autobreadboard-frontend
+    tag: "sha-REPLACE"
+  replicaCount: 2
+  terminationGracePeriodSeconds: 10
+  service:
+    port: 8080
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  # runtime-config.js is injected as /usr/share/nginx/html/runtime-config.js;
+  # `apiBaseUrl` defaults to a same-origin path that the Ingress forwards to
+  # the API Service.
+  runtimeConfig:
+    apiBaseUrl: "/api/v1"
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: autobreadboard.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend
+        - path: /api
+          pathType: Prefix
+          service: api
+  tls: []
+
+config:
+  environment: production
+  logLevel: INFO
+  apiHost: "0.0.0.0"
+  apiPort: 8000
+  corsOrigins:
+    - https://autobreadboard.example.com
+  trustedHosts:
+    - autobreadboard.example.com
+  solverDefaultTimeoutSeconds: 60
+  solverMaxTimeoutSeconds: 600
+  jobLockTtlSeconds: 900
+  exportRetentionDays: 7
+  otelExporterOtlpEndpoint: ""
+
+# Secret resolution: in production this MUST point at a Secret managed
+# out-of-band (External Secrets Operator, sealed-secrets, SOPS, ...).
+# The dev-only inline Secret is only rendered when this is empty AND
+# secrets.dev.enabled is true.
+secrets:
+  existingSecret: autobreadboard-runtime
+  dev:
+    enabled: false
+    secretName: ""
+    databaseUrl: ""
+    redisUrl: ""
+    s3AccessKeyId: ""
+    s3SecretAccessKey: ""
+
+# Postgres / Redis / S3 coordinates live in the ConfigMap *only* for
+# non-credential fields. Credentials are referenced by Secret key and
+# injected via envFrom.secretRef in each workload.
+postgres:
+  host: postgres.example.internal
+  port: 5432
+  database: autobreadboard
+  sslMode: require
+
+redis:
+  url: redis://redis.example.internal:6379/0
+
+s3:
+  endpointUrl: ""
+  region: us-east-1
+  bucket: autobreadboard
+  usePathStyle: "true"
+  publicBaseUrl: ""
+
+networkPolicy:
+  enabled: false
+  ingressNamespace: ingress-nginx
+  monitoringNamespace: ""
+  # Egress to external Postgres/Redis/S3 is allowed to these CIDRs.
+  # The defaults below permit any destination; production values MUST
+  # narrow this to the corporate VPC CIDR range.
+  allowedEgressCidrs:
+    - 0.0.0.0/0
+
+migration:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+serviceAccount:
+  create: true
+
+podDisruptionBudget:
+  enabled: true
+
+serviceMonitor:
+  enabled: false
+  interval: 30s

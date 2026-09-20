@@ -1,0 +1,25 @@
+{{- /* Headless Service that exposes the worker's Prometheus metrics port (9100).
+       Rendered unconditionally because the ServiceMonitor CRD reference is
+       optional — the Service itself is cheap and useful for ad-hoc scraping
+       even when ServiceMonitor is disabled. */ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "autobreadboard.fullname" . }}-worker-metrics
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+  annotations:
+    # Document the role of this Service so operators know it is scrape-only.
+    autobreadboard.example.com/role: worker-metrics
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: {{ .Values.worker.metricsPort | default 9100 }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "autobreadboard.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker

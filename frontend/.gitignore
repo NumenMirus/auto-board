@@ -1,0 +1,11 @@
+.svelte-kit
+build
+dist
+node_modules
+.vite
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+coverage

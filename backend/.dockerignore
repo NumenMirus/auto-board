@@ -1,0 +1,29 @@
+# Anything in .venv is rebuilt by the builder stage; never copy the host venv.
+.venv/
+.uv-cache/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Tests are not shipped in the runtime image; CI runs them in a separate stage.
+tests/
+
+# Local IDE / OS noise.
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# No `.env` in the image — config arrives via env vars / Secret / ConfigMap.
+.env
+.env.*
+!.env.example
+
+# Alembic env doesn't need its local __pycache__ either.
+alembic/versions/__pycache__/

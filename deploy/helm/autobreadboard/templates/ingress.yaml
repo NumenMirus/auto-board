@@ -1,0 +1,45 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "autobreadboard.fullname" . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                {{- if eq .service "api" }}
+                name: {{ $fullName }}-api
+                port:
+                  number: {{ $.Values.api.service.port }}
+                {{- else if eq .service "frontend" }}
+                name: {{ $fullName }}-frontend
+                port:
+                  number: {{ $.Values.frontend.service.port }}
+                {{- else }}
+                # `service` may also be a literal Service name; pass through.
+                name: {{ .service }}
+                port:
+                  number: {{ .port | default 80 }}
+                {{- end }}
+          {{- end }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,52 @@
+[project]
+name = "autobreadboard"
+version = "0.1.0"
+description = "AutoBreadboard backend: Sanic API, arq worker, pure Python solver core"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "sanic[ext]>=25.12,<25.13",
+  "arq>=0.28,<0.29",
+  "sqlalchemy[asyncio]>=2.0,<2.1",
+  "asyncpg>=0.31,<0.32",
+  "alembic>=1.20,<1.21",
+  "pydantic>=2.13,<2.14",
+  "pydantic-settings>=2.15,<2.16",
+  "boto3>=1.43,<1.44",
+  "cairosvg>=2.9,<2.10",
+  "prometheus-client>=0.26,<0.27",
+  "structlog>=26.1,<26.2",
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-exporter-otlp-proto-http>=1.27",
+  "opentelemetry-instrumentation-asyncpg>=0.48b0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=9.1,<9.2",
+  "pytest-asyncio>=0.26",
+  "httpx>=0.28,<0.29",
+  "hypothesis>=6.120",
+  "ruff>=0.9",
+  "mypy>=1.14",
+  "sanic-testing>=24.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+exclude = ["alembic/"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

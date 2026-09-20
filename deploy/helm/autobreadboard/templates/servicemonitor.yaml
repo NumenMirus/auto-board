@@ -1,0 +1,45 @@
+{{- /* ServiceMonitor — Prometheus Operator CRD. Rendered ONLY when
+       serviceMonitor.enabled is true; most clusters don't have the CRD
+       installed and `helm template` against those clusters would fail to
+       render this resource. The default (false) keeps `helm template` and
+       `kubeconform` clean without `-skip ServiceMonitor`. */ -}}
+{{- if .Values.serviceMonitor.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "autobreadboard.fullname" . }}
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval | default "30s" }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "autobreadboard.fullname" . }}-worker
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  selector:
+    matchLabels:
+      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval | default "30s" }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+{{- end }}

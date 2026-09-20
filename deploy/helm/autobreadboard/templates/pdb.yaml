@@ -1,0 +1,35 @@
+{{- /* PodDisruptionBudgets — api + frontend only.
+       A PDB on a single-replica Deployment blocks node drains forever, so
+       guard each with `replicaCount > 1`. Workers are intentionally excluded:
+       addendum §13 requires workers to remain freely evictable. */ -}}
+{{- if .Values.podDisruptionBudget.enabled -}}
+{{- if gt (int .Values.api.replicaCount) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "autobreadboard.fullname" . }}-api
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+{{- end }}
+{{- if gt (int .Values.frontend.replicaCount) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "autobreadboard.fullname" . }}-frontend
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: frontend
+{{- end }}
+{{- end }}

@@ -1,0 +1,57 @@
+# Production overrides. 2 api replicas per addendum §13; worker stays at 1
+# (worker concurrency is tuned via env, not replicas). Secrets and the TLS
+# cert are managed out-of-band by the platform team.
+
+global:
+  environment: production
+
+api:
+  replicaCount: 2
+
+worker:
+  replicaCount: 1
+
+frontend:
+  replicaCount: 2
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: autobreadboard.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend
+        - path: /api
+          pathType: Prefix
+          service: api
+  tls:
+    - hosts:
+        - autobreadboard.example.com
+      secretName: autobreadboard-production-tls
+
+config:
+  environment: production
+  logLevel: INFO
+  corsOrigins:
+    - https://autobreadboard.example.com
+  trustedHosts:
+    - autobreadboard.example.com
+
+secrets:
+  existingSecret: autobreadboard-runtime-production
+  dev:
+    enabled: false
+
+networkPolicy:
+  enabled: true
+  monitoringNamespace: monitoring
+  allowedEgressCidrs:
+    - 10.0.0.0/16
+
+podDisruptionBudget:
+  enabled: true
+
+migration:
+  enabled: true

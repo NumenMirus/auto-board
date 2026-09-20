@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "autobreadboard.fullname" . }}-frontend-config
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+data:
+  # runtime-config.js is injected into index.html before the app bundle so the
+  # SPA learns where the API lives at boot. `no-store` caching is enforced by
+  # the frontend nginx.conf for this exact path.
+  runtime-config.js: |
+    window.__AUTOBREADBOARD_CONFIG__ = {
+      apiBaseUrl: {{ .Values.frontend.runtimeConfig.apiBaseUrl | quote }},
+      environment: {{ .Values.global.environment | quote }},
+      buildSha: {{ .Values.frontend.image.tag | quote }}
+    };
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "autobreadboard.fullname" . }}-frontend
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        {{- include "autobreadboard.labels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+    spec:
+      serviceAccountName: {{ include "autobreadboard.fullname" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # The frontend image is `nginxinc/nginx-unprivileged` which already runs
+      # as a non-root UID (101). We deliberately do NOT pin runAsUser here so
+      # the upstream image's UID mapping works out of the box; we only require
+      # non-root, read-only rootfs with emptyDir for nginx's writable scratch
+      # directories (per addendum §6.3 + nginx-unprivileged docs).
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: frontend
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy | default .Values.api.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: runtime-config
+              mountPath: /usr/share/nginx/html/runtime-config.js
+              subPath: runtime-config.js
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: nginx-cache
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: nginx-run
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: runtime-config
+          configMap:
+            name: {{ include "autobreadboard.fullname" . }}-frontend-config
+      terminationGracePeriodSeconds: {{ .Values.frontend.terminationGracePeriodSeconds | default 10 }}

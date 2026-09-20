@@ -1,0 +1,55 @@
+# Staging overrides. Image tag is overridden at install time by CI; the
+# placeholder below is for `helm template` validation only. secrets point at
+# the externally-managed `autobreadboard-runtime` Secret.
+
+global:
+  environment: staging
+
+api:
+  replicaCount: 1
+
+worker:
+  replicaCount: 1
+
+frontend:
+  replicaCount: 1
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: autobreadboard.staging.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend
+        - path: /api
+          pathType: Prefix
+          service: api
+  tls:
+    - hosts:
+        - autobreadboard.staging.example.com
+      secretName: autobreadboard-staging-tls
+
+config:
+  environment: staging
+  logLevel: INFO
+  corsOrigins:
+    - https://autobreadboard.staging.example.com
+
+secrets:
+  existingSecret: autobreadboard-runtime
+  dev:
+    enabled: false
+
+networkPolicy:
+  enabled: true
+  monitoringNamespace: monitoring
+  allowedEgressCidrs:
+    - 10.0.0.0/16
+
+podDisruptionBudget:
+  enabled: true
+
+migration:
+  enabled: true

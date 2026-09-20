@@ -1,0 +1,14 @@
+apiVersion: v2
+name: autobreadboard
+description: AutoBreadboard — breadboard layout solver
+type: application
+appVersion: "0.1.0"
+version: 0.1.0
+keywords:
+  - breadboard
+  - electronics
+  - solver
+  - kicad
+maintainers:
+  - name: AutoBreadboard Maintainers
+    email: noreply@example.com

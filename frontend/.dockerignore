@@ -1,0 +1,16 @@
+# Reinstalled inside the image by `npm ci`; huge, noisy, and full of host-arch
+# binaries that don't belong in the build context.
+node_modules/
+
+# Build output that the runtime image copies from --from=builder.
+build/
+.svelte-kit/
+
+# Local env / IDE / OS noise.
+.env
+.env.*
+!.env.example
+.DS_Store
+*.swp
+.vscode/
+.idea/

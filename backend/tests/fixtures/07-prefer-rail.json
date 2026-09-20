@@ -1,0 +1,184 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Prefer-rail power/ground",
+  "board": {
+    "modelId": "half-400-standard-split-rails"
+  },
+  "components": [
+    {
+      "ref": "R1",
+      "value": "330",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "LED1",
+      "value": null,
+      "footprintId": "LED-2P",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "J1",
+      "value": null,
+      "footprintId": "HEADER-1x2",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "pwr",
+      "name": "VCC",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "J1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "power",
+      "priority": 10,
+      "constraints": [
+        {
+          "type": "prefer-rail"
+        }
+      ]
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "LED1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "J1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "ground",
+      "priority": 10,
+      "constraints": [
+        {
+          "type": "prefer-rail"
+        }
+      ]
+    },
+    {
+      "id": "drive",
+      "name": "LED_DRIVE",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "LED1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 5,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "half-400-standard-split-rails",
+    "placements": [
+      {
+        "componentRef": "R1",
+        "anchorHoleId": "a1",
+        "orientation": 0,
+        "span": 3,
+        "pinHoles": {
+          "1": "a1",
+          "2": "a4"
+        },
+        "occupiedHoleIds": [
+          "a1",
+          "a2",
+          "a3",
+          "a4"
+        ],
+        "locked": true
+      },
+      {
+        "componentRef": "LED1",
+        "anchorHoleId": "a15",
+        "orientation": 0,
+        "span": 2,
+        "pinHoles": {
+          "1": "a15",
+          "2": "a17"
+        },
+        "occupiedHoleIds": [
+          "a15",
+          "a16",
+          "a17"
+        ],
+        "locked": true
+      },
+      {
+        "componentRef": "J1",
+        "anchorHoleId": "a25",
+        "orientation": 0,
+        "span": null,
+        "pinHoles": {
+          "1": "a25",
+          "2": "a26"
+        },
+        "occupiedHoleIds": [
+          "a25",
+          "a26"
+        ],
+        "locked": true
+      }
+    ],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 12345,
+    "solverPreset": "balanced",
+    "placementWeights": {
+      "weightedDistance": 1.0,
+      "congestion": 15.0,
+      "mechanical": 10.0,
+      "criticalRule": 500.0,
+      "accessibility": 25.0,
+      "overlap": 1000000.0,
+      "cluster": 8.0
+    },
+    "routingWeights": {
+      "lengthMm": 1.0,
+      "jumperCount": 12.0,
+      "crossing": 40.0,
+      "congestion": 30.0,
+      "avoidZone": 100.0,
+      "criticalViolation": 500.0,
+      "unroutedTerminal": 10000.0
+    },
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": []
+}

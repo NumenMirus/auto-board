@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "autobreadboard.fullname" . }}-worker
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "autobreadboard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "autobreadboard.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "autobreadboard.fullname" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy | default .Values.api.image.pullPolicy }}
+          # Worker has no HTTP health endpoint; readiness/liveness come from
+          # app.worker_probe (a Python CLI that polls Redis + the heartbeat file).
+          command: ["python", "-m", "app.worker"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "autobreadboard.fullname" . }}-config
+            {{- if include "autobreadboard.secretName" . }}
+            - secretRef:
+                name: {{ include "autobreadboard.secretName" . }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Expose the worker's Prometheus port (9100) so the ServiceMonitor
+          # can scrape it. Not declared as a Service `port` — only as a metrics
+          # endpoint reachable in-cluster via pod IP / the metrics Service.
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.worker.metricsPort | default 9100 }}
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command: ["python", "-m", "app.worker_probe", "--ready"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["python", "-m", "app.worker_probe", "--live"]
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds | default 120 }}

@@ -1,0 +1,137 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Tact switch pull-up",
+  "board": {
+    "modelId": "half-400-standard-split-rails"
+  },
+  "components": [
+    {
+      "ref": "SW1",
+      "value": null,
+      "footprintId": "TACT-SW-4P",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "R1",
+      "value": "10k",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "J1",
+      "value": null,
+      "footprintId": "HEADER-1x2",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "pwr",
+      "name": "VCC",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "power",
+      "priority": 10,
+      "constraints": []
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "ground",
+      "priority": 10,
+      "constraints": []
+    },
+    {
+      "id": "sig",
+      "name": "SIG",
+      "pins": [
+        {
+          "componentRef": "SW1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "SW1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "SW1",
+          "pin": "3"
+        },
+        {
+          "componentRef": "SW1",
+          "pin": "4"
+        },
+        {
+          "componentRef": "R1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "J1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 5,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "half-400-standard-split-rails",
+    "placements": [],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 12345,
+    "solverPreset": "balanced",
+    "placementWeights": {
+      "weightedDistance": 1.0,
+      "congestion": 15.0,
+      "mechanical": 10.0,
+      "criticalRule": 500.0,
+      "accessibility": 25.0,
+      "overlap": 1000000.0,
+      "cluster": 8.0
+    },
+    "routingWeights": {
+      "lengthMm": 1.0,
+      "jumperCount": 12.0,
+      "crossing": 40.0,
+      "congestion": 30.0,
+      "avoidZone": 100.0,
+      "criticalViolation": 500.0,
+      "unroutedTerminal": 10000.0
+    },
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": []
+}

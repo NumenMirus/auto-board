@@ -1,0 +1,9 @@
+{
+  "maxErrors": 1,
+  "requiredDiagnosticCodes": [
+    "SHORT_BETWEEN_NETS"
+  ],
+  "forbiddenDiagnosticCodes": [],
+  "netsCompleted": 0,
+  "componentsPlaced": 2
+}

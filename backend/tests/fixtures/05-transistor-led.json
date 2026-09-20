@@ -1,0 +1,252 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Transistor + LED load",
+  "board": {
+    "modelId": "half-400-standard-split-rails"
+  },
+  "components": [
+    {
+      "ref": "Q1",
+      "value": "2N3904",
+      "footprintId": "TO-92",
+      "pins": [
+        "1",
+        "2",
+        "3"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "R1",
+      "value": "1k",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "LED1",
+      "value": null,
+      "footprintId": "LED-2P",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "J1",
+      "value": null,
+      "footprintId": "HEADER-1x2",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "base",
+      "name": "BASE_DRIVE",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "J1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "Q1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 5,
+      "constraints": []
+    },
+    {
+      "id": "coll",
+      "name": "COLL",
+      "pins": [
+        {
+          "componentRef": "Q1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "custom",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "emit",
+      "name": "EMIT",
+      "pins": [
+        {
+          "componentRef": "Q1",
+          "pin": "3"
+        }
+      ],
+      "netClass": "custom",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "pwr",
+      "name": "PWR",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "custom",
+      "priority": 10,
+      "constraints": []
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "custom",
+      "priority": 10,
+      "constraints": []
+    },
+    {
+      "id": "led_anode",
+      "name": "LED_ANODE",
+      "pins": [
+        {
+          "componentRef": "LED1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "custom",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "led_cathode",
+      "name": "LED_CATHODE",
+      "pins": [
+        {
+          "componentRef": "LED1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "custom",
+      "priority": 0,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "half-400-standard-split-rails",
+    "placements": [
+      {
+        "componentRef": "Q1",
+        "anchorHoleId": "a20",
+        "orientation": 0,
+        "span": null,
+        "pinHoles": {
+          "1": "a20",
+          "2": "a21",
+          "3": "a22"
+        },
+        "occupiedHoleIds": [
+          "a20",
+          "a21",
+          "a22"
+        ],
+        "locked": true
+      },
+      {
+        "componentRef": "R1",
+        "anchorHoleId": "a10",
+        "orientation": 270,
+        "span": 2,
+        "pinHoles": {
+          "1": "a10",
+          "2": "a12"
+        },
+        "occupiedHoleIds": [
+          "a10",
+          "a11",
+          "a12"
+        ],
+        "locked": true
+      },
+      {
+        "componentRef": "LED1",
+        "anchorHoleId": "f15",
+        "orientation": 270,
+        "span": 2,
+        "pinHoles": {
+          "1": "f15",
+          "2": "f17"
+        },
+        "occupiedHoleIds": [
+          "f15",
+          "f16",
+          "f17"
+        ],
+        "locked": true
+      },
+      {
+        "componentRef": "J1",
+        "anchorHoleId": "a5",
+        "orientation": 270,
+        "span": null,
+        "pinHoles": {
+          "1": "a5",
+          "2": "a6"
+        },
+        "occupiedHoleIds": [
+          "a5",
+          "a6"
+        ],
+        "locked": true
+      }
+    ],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 12345,
+    "solverPreset": "balanced",
+    "placementWeights": {
+      "weightedDistance": 1.0,
+      "congestion": 15.0,
+      "mechanical": 10.0,
+      "criticalRule": 500.0,
+      "accessibility": 25.0,
+      "overlap": 1000000.0,
+      "cluster": 8.0
+    },
+    "routingWeights": {
+      "lengthMm": 1.0,
+      "jumperCount": 12.0,
+      "crossing": 40.0,
+      "congestion": 30.0,
+      "avoidZone": 100.0,
+      "criticalViolation": 500.0,
+      "unroutedTerminal": 10000.0
+    },
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": []
+}

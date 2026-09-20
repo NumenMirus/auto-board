@@ -1,0 +1,145 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Induced short",
+  "board": {
+    "modelId": "half-400-standard-split-rails"
+  },
+  "components": [
+    {
+      "ref": "R1",
+      "value": "330",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": true,
+      "tags": []
+    },
+    {
+      "ref": "R2",
+      "value": "330",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": true,
+      "tags": []
+    },
+    {
+      "ref": "J1",
+      "value": null,
+      "footprintId": "HEADER-1x2",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "netA",
+      "name": "A",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "J1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 5,
+      "constraints": []
+    },
+    {
+      "id": "netB",
+      "name": "B",
+      "pins": [
+        {
+          "componentRef": "R2",
+          "pin": "1"
+        },
+        {
+          "componentRef": "J1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 5,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "half-400-standard-split-rails",
+    "placements": [
+      {
+        "componentRef": "R1",
+        "anchorHoleId": "a5",
+        "orientation": 0,
+        "span": 3,
+        "pinHoles": {
+          "1": "a5",
+          "2": "a8"
+        },
+        "occupiedHoleIds": [
+          "a5",
+          "a6",
+          "a7",
+          "a8"
+        ],
+        "locked": true
+      },
+      {
+        "componentRef": "R2",
+        "anchorHoleId": "c5",
+        "orientation": 0,
+        "span": 3,
+        "pinHoles": {
+          "1": "c5",
+          "2": "c8"
+        },
+        "occupiedHoleIds": [
+          "c5",
+          "c6",
+          "c7",
+          "c8"
+        ],
+        "locked": true
+      }
+    ],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 12345,
+    "solverPreset": "balanced",
+    "placementWeights": {
+      "weightedDistance": 1.0,
+      "congestion": 15.0,
+      "mechanical": 10.0,
+      "criticalRule": 500.0,
+      "accessibility": 25.0,
+      "overlap": 1000000.0,
+      "cluster": 8.0
+    },
+    "routingWeights": {
+      "lengthMm": 1.0,
+      "jumperCount": 12.0,
+      "crossing": 40.0,
+      "congestion": 30.0,
+      "avoidZone": 100.0,
+      "criticalViolation": 500.0,
+      "unroutedTerminal": 10000.0
+    },
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": []
+}

@@ -1,0 +1,62 @@
+{{- if .Values.migration.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "autobreadboard.fullname" . }}-migrate
+  labels:
+    {{- include "autobreadboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "autobreadboard.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "autobreadboard.fullname" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "autobreadboard.fullname" . }}-config
+            {{- if include "autobreadboard.secretName" . }}
+            - secretRef:
+                name: {{ include "autobreadboard.secretName" . }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+{{- end }}

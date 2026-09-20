@@ -1,0 +1,35 @@
+# Kind cluster configuration for local AutoBreadboard development.
+# Single control-plane node with hostPort mappings so the ingress-nginx
+# controller can be reached on http://localhost / https://localhost from the
+# host machine (standard kind + ingress-nginx quickstart).
+#
+# Usage:
+#   kind create cluster --config deploy/local/kind-cluster.yaml
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+#   helm install ingress-nginx ingress-nginx/ingress-nginx \
+#       --namespace ingress-nginx --create-namespace \
+#       --values deploy/local/ingress-values.yaml
+#   make k8s-deploy   # installs AutoBreadboard with values-dev.yaml
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: autobreadboard
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
+      - containerPort: 80
+        hostPort: 8080
+        protocol: TCP
+        listenAddress: "127.0.0.1"

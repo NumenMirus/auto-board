@@ -1,0 +1,22 @@
+# Helm values for ingress-nginx tuned for kind. Mirrors the upstream
+# "kind" quickstart values (https://kind.sigs.k8s.io/docs/user/ingress/).
+# `controller.hostPort.enabled: true` is what makes hostPort 80/443 actually
+# reachable from the host machine.
+
+controller:
+  hostPort:
+    enabled: true
+  # Bind on every node interface; hostPort takes care of host reachability.
+  service:
+    type: NodePort
+  nodeSelector:
+    ingress-ready: "true"
+  # Match upstream kind quickstart: tolerations, admission webhook patches,
+  # and the `ingressClassResource` defaults that work with networking.k8s.io/v1.
+  admissionWebhooks:
+    enabled: false
+  watchIngressWithoutClass: false
+  ingressClassResource:
+    name: nginx
+    enabled: true
+    default: true

@@ -1,0 +1,171 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "74HC14 + power + LED",
+  "board": {
+    "modelId": "half-400-standard-split-rails"
+  },
+  "components": [
+    {
+      "ref": "U1",
+      "value": "74HC14",
+      "footprintId": "DIP-14",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "R3",
+      "value": "330",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "LED1",
+      "value": null,
+      "footprintId": "LED-2P",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "J1",
+      "value": null,
+      "footprintId": "HEADER-1x2",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "pwr",
+      "name": "VCC",
+      "pins": [
+        {
+          "componentRef": "U1",
+          "pin": "14"
+        },
+        {
+          "componentRef": "J1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "power",
+      "priority": 10,
+      "constraints": []
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "U1",
+          "pin": "7"
+        },
+        {
+          "componentRef": "LED1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "J1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "ground",
+      "priority": 10,
+      "constraints": []
+    },
+    {
+      "id": "out",
+      "name": "OUT1",
+      "pins": [
+        {
+          "componentRef": "U1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "R3",
+          "pin": "1"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 5,
+      "constraints": []
+    },
+    {
+      "id": "led",
+      "name": "LED_DRIVE",
+      "pins": [
+        {
+          "componentRef": "R3",
+          "pin": "2"
+        },
+        {
+          "componentRef": "LED1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 5,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "half-400-standard-split-rails",
+    "placements": [],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 12345,
+    "solverPreset": "balanced",
+    "placementWeights": {
+      "weightedDistance": 1.0,
+      "congestion": 15.0,
+      "mechanical": 10.0,
+      "criticalRule": 500.0,
+      "accessibility": 25.0,
+      "overlap": 1000000.0,
+      "cluster": 8.0
+    },
+    "routingWeights": {
+      "lengthMm": 1.0,
+      "jumperCount": 12.0,
+      "crossing": 40.0,
+      "congestion": 30.0,
+      "avoidZone": 100.0,
+      "criticalViolation": 500.0,
+      "unroutedTerminal": 10000.0
+    },
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": []
+}

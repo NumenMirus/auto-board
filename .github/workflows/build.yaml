@@ -1,0 +1,94 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}
+
+jobs:
+  build:
+    name: build & push (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write      # required for cosign keyless signing (when enabled)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: api
+            context: backend
+            dockerfile: backend/Dockerfile
+            image: autobreadboard-api
+          - target: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+            image: autobreadboard-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract short SHA
+        id: meta
+        run: echo "short_sha=$(echo ${{ github.sha }} | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push (${{ matrix.image }})
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          load: false
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:sha-${{ steps.meta.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:sha-${{ steps.meta.outputs.short_sha }}-${{ matrix.target }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+          provenance: true
+          sbom: false
+
+      - name: Generate SBOM (syft)
+        if: github.event_name == 'push'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:sha-${{ steps.meta.outputs.short_sha }}
+          format: spdx-json
+          artifact-name: sbom-${{ matrix.image }}.spdx.json
+
+      - name: Install cosign
+        if: github.event_name == 'push' && env.COSIGN_KEY != ''
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.2.4
+      - name: Sign image (${{ matrix.image }})
+        if: github.event_name == 'push' && env.COSIGN_KEY != ''
+        env:
+          COSIGN_KEY: ${{ secrets.COSIGN_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign sign --yes \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:sha-${{ steps.meta.outputs.short_sha }}"
