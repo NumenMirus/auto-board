@@ -17,7 +17,8 @@
   import { projectStore } from '$lib/state/project.svelte';
   import { debounce } from '$lib/debounce';
   import type {
-    BreadboardModel,
+    AnyBoardModel,
+    BoardKind,
     BreadboardFootprint,
     Diagnostic,
     Layout,
@@ -66,7 +67,7 @@
         const envelope = await apiFetch<ProjectEnvelope>(`/projects/${id}`);
         if (cancelled) return;
         const [board, footprintsList] = await Promise.all([
-          apiFetch<BreadboardModel>(`/board-models/${envelope.boardModelId}`),
+          apiFetch<AnyBoardModel & { kind: BoardKind }>(`/board-models/${envelope.boardModelId}`),
           apiFetch<BreadboardFootprint[]>('/footprints')
         ]);
         if (cancelled) return;
@@ -75,10 +76,15 @@
 
         projectStore.document = envelope.document;
         projectStore.board = board;
+        projectStore.boardKind = board.kind;
         projectStore.footprints = footprints;
+        projectStore.traceLayout = null;
         // Seed the undo machinery with the loaded layout so the first
         // mutation isn't preceded by a "ghost" empty-state undo entry.
-        projectStore.pushUndo(envelope.document.layout);
+        // Perfboard layouts don't use the breadboard undo stack.
+        if (board.kind === 'breadboard') {
+          projectStore.pushUndo(envelope.document.layout);
+        }
       } catch (err) {
         if (cancelled) return;
         loadError = err instanceof ApiError ? err.message : 'Failed to load project.';
@@ -101,7 +107,10 @@
   const runValidate = async (): Promise<void> => {
     const doc = projectStore.document;
     const board = projectStore.board;
-    if (doc === null || board === null) return;
+    // The synchronous /validate endpoint only understands breadboard
+    // Layouts; perfboard diagnostics come from the trace-solve job result
+    // instead (there's no live-edit loop for perfboard traces yet).
+    if (doc === null || board === null || projectStore.boardKind === 'perfboard') return;
     validatingNow = true;
     lastValidateError = null;
     try {
@@ -183,10 +192,8 @@
   }
 
   function deleteSelection(kind: 'component' | 'jumper' | 'trace', id: string): void {
-    // This editor route only ever loads a breadboard Layout (perfboard
-    // projects use a read-only preview until the perfboard editor lands);
-    // a 'trace' selection can't occur here, but the callback signature must
-    // satisfy BoardCanvas's shared (breadboard | perfboard) prop contract.
+    // Traces are solver-generated (never hand-drawn); there's no delete
+    // affordance for them, so a trace selection is a no-op here.
     if (kind === 'trace') return;
     const doc = projectStore.document;
     if (doc === null) return;
@@ -270,10 +277,23 @@
       await runValidate();
       return;
     }
+    // Perfboard has no separate placement phase and no synchronous
+    // validator; only 'route' and 'solve' are meaningful, and the backend
+    // exposes them under different operation names (trace-route /
+    // trace-solve). The Toolbar hides Auto-place/Optimize for perfboard
+    // (see the template below), so those two never reach here for it.
+    const resolvedOperation: SolverOperation =
+      projectStore.boardKind === 'perfboard'
+        ? operation === 'route'
+          ? 'trace-route'
+          : operation === 'solve'
+            ? 'trace-solve'
+            : operation
+        : operation;
     try {
       const seed = doc.settings.seed;
       const preset = doc.settings.solverPreset;
-      const job = await createJob(params.id, operation, {
+      const job = await createJob(params.id, resolvedOperation, {
         seed,
         options: {
           seed,
@@ -299,18 +319,18 @@
     score: LayoutScore;
     diagnostics: Diagnostic[];
   }): void {
-    // This route only ever solves a breadboard project's Layout (perfboard
-    // solves produce a TraceLayout, which this editor doesn't render yet).
-    if (!('jumpers' in result.layout)) return;
-    projectStore.applyLayoutMutation(result.layout);
+    if ('jumpers' in result.layout) {
+      projectStore.applyLayoutMutation(result.layout);
+    } else {
+      projectStore.applyTraceLayout(result.layout);
+    }
     projectStore.diagnostics = result.diagnostics;
     projectStore.score = result.score;
     projectStore.clearJob();
-    // The solver produced a fresh layout; remember its id (if the backend
-    // returns one in future progress responses) so ExportMenu can target it.
-    lastResultLayoutId = null;
-    // Re-run the synchronous validator so diagnostics stay consistent
-    // with what the editor actually displays.
+    // Re-run the synchronous validator so diagnostics stay consistent with
+    // what the editor actually displays. No-ops for perfboard (see
+    // runValidate's guard) since its diagnostics already came from the
+    // trace-solve job result above.
     void runValidate();
   }
 
@@ -362,22 +382,22 @@
   // authoritative state.
   // ------------------------------------------------------------------------
   function onSelect(kind: 'component' | 'jumper' | 'trace', id: string): void {
-    // This route never renders a TraceLayout (see deleteSelection above),
-    // so 'trace' is unreachable here; it's only in the signature to match
-    // BoardCanvas's shared prop contract.
-    if (kind === 'trace') return;
     projectStore.setSelection({ kind, id });
   }
 
-  // Project the store's wide Selection union onto the narrower shape the
-  // BoardCanvas wants (component/jumper only).
+  // Project the store's wide Selection union onto the narrower shape
+  // BoardCanvas wants (component/jumper/trace).
   const canvasSelectionId = $derived(
-    projectStore.selection.kind === 'component' || projectStore.selection.kind === 'jumper'
+    projectStore.selection.kind === 'component' ||
+      projectStore.selection.kind === 'jumper' ||
+      projectStore.selection.kind === 'trace'
       ? projectStore.selection.id
       : null
   );
   const canvasSelectionKind = $derived<'component' | 'jumper' | 'trace' | null>(
-    projectStore.selection.kind === 'component' || projectStore.selection.kind === 'jumper'
+    projectStore.selection.kind === 'component' ||
+      projectStore.selection.kind === 'jumper' ||
+      projectStore.selection.kind === 'trace'
       ? projectStore.selection.kind
       : null
   );
@@ -439,6 +459,9 @@
   {:else if projectStore.board && projectStore.document}
     <Toolbar
       disabled={false}
+      showAutoPlace={projectStore.boardKind !== 'perfboard'}
+      showValidate={projectStore.boardKind !== 'perfboard'}
+      showOptimize={projectStore.boardKind !== 'perfboard'}
       onAutoPlace={() => void startOperation('place')}
       onAutoRoute={() => void startOperation('route')}
       onSolve={() => void startOperation('solve')}
@@ -459,7 +482,9 @@
     <div class="canvas-wrap">
       <BoardCanvas
         board={projectStore.board}
-        layout={projectStore.document.layout}
+        layout={projectStore.boardKind === 'perfboard'
+          ? (projectStore.traceLayout ?? undefined)
+          : projectStore.document.layout}
         showLabels={true}
         jumperToolActive={jumperToolActive}
         jumperStartHoleId={null}
@@ -507,7 +532,7 @@
           onAllowCriticalChange={updateAllowCritical}
         />
       {/if}
-      <ExportMenu layoutId={lastResultLayoutId} />
+      <ExportMenu layoutId={lastResultLayoutId} boardKind={projectStore.boardKind} />
     </aside>
 
     {#if validatingNow}

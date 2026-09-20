@@ -6,6 +6,13 @@
     onValidate?: (() => void) | undefined;
     onOptimize?: (() => void) | undefined;
     disabled?: boolean;
+    // Perfboard has no separate placement phase, no synchronous validator,
+    // and no routing-feedback optimize pass yet — the editor page hides
+    // those buttons entirely for perfboard rather than shipping controls
+    // that silently do nothing when clicked.
+    showAutoPlace?: boolean;
+    showValidate?: boolean;
+    showOptimize?: boolean;
   };
   let {
     onAutoPlace = undefined,
@@ -13,26 +20,35 @@
     onSolve = undefined,
     onValidate = undefined,
     onOptimize = undefined,
-    disabled = false
+    disabled = false,
+    showAutoPlace = true,
+    showValidate = true,
+    showOptimize = true
   }: Props = $props();
 </script>
 
 <nav class="toolbar" aria-label="Solver actions">
-  <button type="button" disabled={disabled} onclick={() => onAutoPlace?.()}>
-    Auto-place
-  </button>
+  {#if showAutoPlace}
+    <button type="button" disabled={disabled} onclick={() => onAutoPlace?.()}>
+      Auto-place
+    </button>
+  {/if}
   <button type="button" disabled={disabled} onclick={() => onAutoRoute?.()}>
     Auto-route
   </button>
   <button type="button" disabled={disabled} onclick={() => onSolve?.()}>
     Solve
   </button>
-  <button type="button" disabled={disabled} onclick={() => onValidate?.()}>
-    Validate
-  </button>
-  <button type="button" disabled={disabled} onclick={() => onOptimize?.()}>
-    Optimize
-  </button>
+  {#if showValidate}
+    <button type="button" disabled={disabled} onclick={() => onValidate?.()}>
+      Validate
+    </button>
+  {/if}
+  {#if showOptimize}
+    <button type="button" disabled={disabled} onclick={() => onOptimize?.()}>
+      Optimize
+    </button>
+  {/if}
 </nav>
 
 <style>

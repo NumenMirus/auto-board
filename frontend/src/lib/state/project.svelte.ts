@@ -22,12 +22,14 @@
  */
 
 import type {
+  AnyBoardModel,
+  BoardKind,
   BreadboardFootprint,
-  BreadboardModel,
   Diagnostic,
   Layout,
   LayoutScore,
-  ProjectDocument
+  ProjectDocument,
+  TraceLayout
 } from '../types';
 
 const STACK_CAP = 100;
@@ -36,6 +38,7 @@ export type Selection =
   | { kind: 'component'; id: string }
   | { kind: 'net'; id: string }
   | { kind: 'jumper'; id: string }
+  | { kind: 'trace'; id: string }
   | { kind: null; id: null };
 
 function emptySelection(): Selection {
@@ -44,11 +47,18 @@ function emptySelection(): Selection {
 
 class ProjectStore {
   document = $state<ProjectDocument | null>(null);
-  board = $state<BreadboardModel | null>(null);
+  board = $state<AnyBoardModel | null>(null);
+  boardKind = $state<BoardKind>('breadboard');
   footprints = $state<Record<string, BreadboardFootprint>>({});
   diagnostics = $state<Diagnostic[]>([]);
   score = $state<LayoutScore | null>(null);
   selection = $state<Selection>(emptySelection());
+
+  // Perfboard trace-solve results. Perfboard layouts aren't hand-edited
+  // (traces come only from the solver) so they don't participate in the
+  // breadboard undo/redo stacks below — applying a new trace-solve result
+  // simply replaces this field outright.
+  traceLayout = $state<TraceLayout | null>(null);
 
   undoStack = $state<Layout[]>([]);
   redoStack = $state<Layout[]>([]);
@@ -138,6 +148,13 @@ class ProjectStore {
       this.document = { ...this.document, layout: newLayout };
     }
     this.currentLayout = newLayout;
+  }
+
+  // Perfboard equivalent of `applyLayoutMutation`: replaces the trace
+  // layout outright (no undo history — perfboard layouts are re-solved
+  // from the placement, never hand-edited trace-by-trace).
+  applyTraceLayout(newLayout: TraceLayout): void {
+    this.traceLayout = newLayout;
   }
 
   clearJob(): void {
