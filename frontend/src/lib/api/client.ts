@@ -208,6 +208,10 @@ export interface SolverOptions {
   maxPlacementRestarts?: number;
   maxLocalSearchIterations?: number;
   maxRipupIterations?: number;
+  /** CP-SAT placer budget in ms (ignored by the greedy engine). */
+  placementTimeLimitMs?: number;
+  /** Number of candidate solutions the CP-SAT placer should return. */
+  placementSolutionCount?: number;
 }
 
 export interface JobCreateRequest {

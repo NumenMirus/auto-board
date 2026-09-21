@@ -95,6 +95,8 @@ async def create_project(request: Request) -> HTTPResponse:
                 "placementWeights": {},
                 "routingWeights": {},
                 "allowCriticalNetClasses": False,
+                "placementTimeLimitMs": 15000,
+                "placementSolutionCount": 5,
             },
             "footprintOverrides": [],
             "schematic": None,

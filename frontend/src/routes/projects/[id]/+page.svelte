@@ -496,7 +496,9 @@
           preset: preset as 'fast' | 'balanced' | 'quality',
           placementWeights: doc.settings.placementWeights,
           routingWeights: doc.settings.routingWeights,
-          allowCriticalNetClasses: doc.settings.allowCriticalNetClasses
+          allowCriticalNetClasses: doc.settings.allowCriticalNetClasses,
+          placementTimeLimitMs: doc.settings.placementTimeLimitMs,
+          placementSolutionCount: doc.settings.placementSolutionCount
         }
       });
       projectStore.setJobSnapshot({

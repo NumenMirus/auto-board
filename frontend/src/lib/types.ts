@@ -380,6 +380,10 @@ export interface ProjectSettings {
   placementWeights: Record<string, number>;
   routingWeights: Record<string, number>;
   allowCriticalNetClasses: boolean;
+  /** CP-SAT placer budget in ms (ignored by the greedy engine). */
+  placementTimeLimitMs: number;
+  /** Number of candidate solutions the CP-SAT placer should return. */
+  placementSolutionCount: number;
 }
 
 export interface FootprintOverride {
