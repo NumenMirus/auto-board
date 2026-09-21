@@ -7,7 +7,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAMESPACE: ${{ github.repository_owner }}
+  # GHCR requires lowercase owner names; force lowercase so the
+  # tag `ghcr.io/<owner>/<image>:...` is valid even when the GitHub
+  # org/user name contains capital letters (e.g. "NumenMirus").
+  IMAGE_NAMESPACE: ${{ lower(github.repository_owner) }}
 
 jobs:
   build:
