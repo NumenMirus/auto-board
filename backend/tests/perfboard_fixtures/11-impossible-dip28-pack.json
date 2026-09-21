@@ -1,0 +1,275 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Perf impossible DIP-28 pack",
+  "board": {
+    "modelId": "strip-15x20-double"
+  },
+  "components": [
+    {
+      "ref": "U1",
+      "value": "BIG",
+      "footprintId": "DIP-28",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26",
+        "27",
+        "28"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "U2",
+      "value": "BIG",
+      "footprintId": "DIP-28",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26",
+        "27",
+        "28"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "U3",
+      "value": "BIG",
+      "footprintId": "DIP-28",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26",
+        "27",
+        "28"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "U4",
+      "value": "BIG",
+      "footprintId": "DIP-28",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26",
+        "27",
+        "28"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "J1",
+      "value": "PWR",
+      "footprintId": "CONN-1x3",
+      "pins": [
+        "1",
+        "2",
+        "3"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "vcc",
+      "name": "VCC",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "28"
+        },
+        {
+          "componentRef": "U2",
+          "pin": "28"
+        },
+        {
+          "componentRef": "U3",
+          "pin": "28"
+        },
+        {
+          "componentRef": "U4",
+          "pin": "28"
+        }
+      ],
+      "netClass": "power",
+      "priority": 100,
+      "constraints": []
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "14"
+        },
+        {
+          "componentRef": "U2",
+          "pin": "14"
+        },
+        {
+          "componentRef": "U3",
+          "pin": "14"
+        },
+        {
+          "componentRef": "U4",
+          "pin": "14"
+        }
+      ],
+      "netClass": "ground",
+      "priority": 100,
+      "constraints": []
+    },
+    {
+      "id": "bus-a",
+      "name": "BUS-A",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "3"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "U2",
+          "pin": "1"
+        },
+        {
+          "componentRef": "U3",
+          "pin": "1"
+        },
+        {
+          "componentRef": "U4",
+          "pin": "1"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 80,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "strip-15x20-double",
+    "placements": [],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 7,
+    "solverPreset": "balanced",
+    "placementWeights": {},
+    "routingWeights": {},
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": [],
+  "schematic": null
+}

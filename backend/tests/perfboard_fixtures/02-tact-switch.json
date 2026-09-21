@@ -1,0 +1,128 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Perf tact switch debounce",
+  "board": {
+    "modelId": "strip-15x20-double"
+  },
+  "components": [
+    {
+      "ref": "SW1",
+      "value": "SW",
+      "footprintId": "TACT-SW-4P",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "R1",
+      "value": "10k",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "HDR1",
+      "value": "CTRL",
+      "footprintId": "HEADER-1x4",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "vcc",
+      "name": "VCC",
+      "pins": [
+        {
+          "componentRef": "HDR1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "R1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "power",
+      "priority": 90,
+      "constraints": []
+    },
+    {
+      "id": "sense",
+      "name": "SENSE",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "SW1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "SW1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "HDR1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 70,
+      "constraints": []
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "SW1",
+          "pin": "3"
+        },
+        {
+          "componentRef": "SW1",
+          "pin": "4"
+        },
+        {
+          "componentRef": "HDR1",
+          "pin": "3"
+        }
+      ],
+      "netClass": "ground",
+      "priority": 100,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "strip-15x20-double",
+    "placements": [],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 7,
+    "solverPreset": "balanced",
+    "placementWeights": {},
+    "routingWeights": {},
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": [],
+  "schematic": null
+}

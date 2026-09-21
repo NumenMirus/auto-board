@@ -85,9 +85,30 @@ def _net_terminal_holes(
     return holes
 
 
-def _sort_nets(nets: list[Net]) -> list[Net]:
-    """Order nets: critical classes first, then power/ground, then multi-terminal,
-    then by priority desc, then by id ascending."""
+def _manhattan_between_holes(a: str, b: str, graph: maze.MazeGraph) -> int:
+    na = graph.nodes[a]
+    nb = graph.nodes[b]
+    return abs(na.row - nb.row) + abs(na.col - nb.col)
+
+
+def _net_span(terminals: list[str], graph: maze.MazeGraph) -> int:
+    if len(terminals) < 2:
+        return 0
+    rows = [graph.nodes[hid].row for hid in terminals]
+    cols = [graph.nodes[hid].col for hid in terminals]
+    return (max(rows) - min(rows)) + (max(cols) - min(cols))
+
+
+def _sort_nets(
+    nets: list[Net],
+    *,
+    pin_map: dict[str, dict[str, str]],
+    graph: maze.MazeGraph,
+) -> list[Net]:
+    """Order nets by class, explicit priority, terminal count, estimated span,
+    then id. This keeps hard/important nets from being starved by easy local
+    links that happen to appear first in the input document.
+    """
     priority_class = {
         "ground": 0,
         "power": 1,
@@ -100,34 +121,40 @@ def _sort_nets(nets: list[Net]) -> list[Net]:
         "custom": 8,
     }
 
-    def key(n: Net) -> tuple[int, int, int, str]:
+    def key(n: Net) -> tuple[int, int, int, int, str]:
+        terminals = [h for h in _net_terminal_holes(n, pin_map) if graph.has_node(h)]
         return (
             priority_class.get(n.net_class, 9),
-            0 if n.net_class in ("ground", "power") else 1,
-            -len(n.pins),
+            -n.priority,
+            -len(terminals),
+            -_net_span(terminals, graph),
             n.id,
         )
 
     return sorted(nets, key=key)
 
 
-def _steiner_order(terminals: list[str], graph: maze.MazeGraph) -> list[str]:
-    """Greedy attach: start at the first terminal, repeatedly append the
-    closest-to-the-tree terminal until all are included. Cost is Manhattan.
-    """
-    if len(terminals) <= 1:
-        return list(terminals)
-    remaining = set(terminals[1:])
-    order = [terminals[0]]
-    while remaining:
-        anchor_row, anchor_col = graph.nodes[order[-1]].row, graph.nodes[order[-1]].col
-        nxt = min(
-            remaining,
-            key=lambda h: abs(graph.nodes[h].row - anchor_row) + abs(graph.nodes[h].col - anchor_col),
+def _pick_tree_root(terminals: list[str], graph: maze.MazeGraph) -> str:
+    return min(terminals, key=lambda hid: (graph.nodes[hid].row, graph.nodes[hid].col, hid))
+
+
+def _pick_tree_attachment(
+    remaining: set[str],
+    tree_holes: set[str],
+    graph: maze.MazeGraph,
+) -> tuple[str, str]:
+    best: tuple[int, str, str] | None = None
+    for terminal in remaining:
+        anchor = min(
+            tree_holes,
+            key=lambda hole_id: (_manhattan_between_holes(hole_id, terminal, graph), hole_id),
         )
-        order.append(nxt)
-        remaining.remove(nxt)
-    return order
+        candidate = (_manhattan_between_holes(anchor, terminal, graph), terminal, anchor)
+        if best is None or candidate < best:
+            best = candidate
+    assert best is not None
+    _distance, terminal, anchor = best
+    return anchor, terminal
 
 
 def _path_to_segments(
@@ -217,7 +244,7 @@ def route(
     unrouted: list[str] = []
     trace_cost_total = 0.0
 
-    ordered_nets = _sort_nets(nets)
+    ordered_nets = _sort_nets(nets, pin_map=pin_map, graph=graph)
     total_nets = max(1, len(ordered_nets))
 
     for idx, net in enumerate(ordered_nets):
@@ -226,35 +253,40 @@ def route(
         if progress is not None:
             progress("route", int(20 + 70 * idx / total_nets))
 
-        terminals = _net_terminal_holes(net, pin_map)
+        terminals = list(dict.fromkeys(_net_terminal_holes(net, pin_map)))
         # Drop terminals not on the maze (e.g. invalid pin_holes)
         terminals = [h for h in terminals if graph.has_node(h)]
         if len(terminals) < 2:
             unrouted.append(net.id)
             continue
 
-        order = _steiner_order(terminals, graph)
-        anchor = order[0]
+        root = _pick_tree_root(terminals, graph)
         net_traces: list[Trace] = []
         net_vias: list[Via] = []
         net_succeeded = True
         forbidden: set[tuple[str, str, str]] = set()
+        last_failed_traces: list[Trace] = []
 
         # Try once, then up to max_ripup_iterations rip-ups
         for attempt in range(max_ripup_iterations + 1):
             if cancel is not None and cancel():
                 raise DomainError("cancelled by solver")
-            cur_anchor = anchor
             cur_traces: list[Trace] = []
             cur_vias: list[Via] = []
+            cur_results: list[maze.MazeResult] = []
+            tree_holes: set[str] = {root}
+            remaining = {h for h in terminals if h != root}
             ok = True
-            for nxt in order[1:]:
+            congestion_weight = 0.5 + (0.5 * attempt)
+            while remaining:
+                cur_anchor, nxt = _pick_tree_attachment(remaining, tree_holes, graph)
                 result = maze.maze_route(
                     graph,
                     cur_anchor,
                     nxt,
                     start_layer="top",
                     forbidden_edges=forbidden,
+                    congestion_weight=congestion_weight,
                 )
                 if result is None:
                     ok = False
@@ -272,14 +304,19 @@ def route(
                     )
                 )
                 cur_vias.extend(vs)
-                maze.record_usage(graph, result)
-                cur_anchor = nxt
+                cur_results.append(result)
+                tree_holes.update(result.path)
+                remaining.remove(nxt)
             if ok:
                 net_traces = cur_traces
                 net_vias = cur_vias
+                for routed in cur_results:
+                    maze.record_usage(graph, routed)
                 break
             # Rip-up: forbid edges of the k highest-cost traces in this net
-            forbidden |= _ripup_forbidden(cur_traces, graph, DEFAULT_RIPUP_K)
+            if cur_traces:
+                last_failed_traces = list(cur_traces)
+            forbidden |= _ripup_forbidden(last_failed_traces, graph, DEFAULT_RIPUP_K)
         else:
             net_succeeded = False
 

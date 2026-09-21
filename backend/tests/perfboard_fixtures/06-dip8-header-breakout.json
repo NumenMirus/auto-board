@@ -1,0 +1,175 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Perf DIP8 header breakout",
+  "board": {
+    "modelId": "strip-20x30-double"
+  },
+  "components": [
+    {
+      "ref": "HDR1",
+      "value": "HDR",
+      "footprintId": "HEADER-1x8",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "U1",
+      "value": "74HC04",
+      "footprintId": "DIP-8",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "R1",
+      "value": "10k",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "sig1",
+      "name": "SIG1",
+      "pins": [
+        {
+          "componentRef": "HDR1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 60,
+      "constraints": []
+    },
+    {
+      "id": "sig2",
+      "name": "SIG2",
+      "pins": [
+        {
+          "componentRef": "HDR1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "3"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 60,
+      "constraints": []
+    },
+    {
+      "id": "sig3",
+      "name": "SIG3",
+      "pins": [
+        {
+          "componentRef": "HDR1",
+          "pin": "3"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "5"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 60,
+      "constraints": []
+    },
+    {
+      "id": "sig4",
+      "name": "SIG4",
+      "pins": [
+        {
+          "componentRef": "HDR1",
+          "pin": "4"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "6"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 60,
+      "constraints": []
+    },
+    {
+      "id": "pullup",
+      "name": "PULLUP",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "HDR1",
+          "pin": "8"
+        }
+      ],
+      "netClass": "power",
+      "priority": 75,
+      "constraints": []
+    },
+    {
+      "id": "sense",
+      "name": "SENSE",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 50,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "strip-20x30-double",
+    "placements": [],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 7,
+    "solverPreset": "balanced",
+    "placementWeights": {},
+    "routingWeights": {},
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": [],
+  "schematic": null
+}

@@ -153,6 +153,133 @@ def test_route_driver_unrouted_terminal_for_single_pin_net() -> None:
     assert "N1" in res.unrouted_nets
 
 
+def test_route_driver_orders_harder_higher_priority_nets_first() -> None:
+    g = maze.build_maze(rows=8, cols=8, pitch_mm=2.54, double_sided=True)
+    placements = [
+        _placement("A1", "1-1", {"1": "1-1", "2": "1-2"}),
+        _placement("A2", "1-7", {"1": "1-7", "2": "1-8"}),
+        _placement("B1", "6-1", {"1": "6-1", "2": "6-2"}),
+        _placement("B2", "6-7", {"1": "6-7", "2": "6-8"}),
+    ]
+    components = [
+        Component(ref="A1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+        Component(ref="A2", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+        Component(ref="B1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+        Component(ref="B2", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+    ]
+    nets = [
+        Net(
+            id="LOW",
+            name="LOW",
+            pins=[PinRef(component_ref="A1", pin="1"), PinRef(component_ref="A2", pin="1")],
+            net_class="low-priority",
+            priority=1,
+        ),
+        Net(
+            id="HIGH",
+            name="HIGH",
+            pins=[PinRef(component_ref="B1", pin="1"), PinRef(component_ref="B2", pin="1")],
+            net_class="ground",
+            priority=100,
+        ),
+    ]
+    res = route_traces(
+        board_id="test-board",
+        placements=placements,
+        components=components,
+        footprints=PERFBOARD_FOOTPRINTS,
+        nets=nets,
+        graph=g,
+    )
+    assert res.layout.traces[0].net_id == "HIGH"
+
+
+def test_route_driver_reuses_existing_tree_for_multi_terminal_net() -> None:
+    g = maze.build_maze(rows=6, cols=6, pitch_mm=2.54, double_sided=True)
+    placements = [
+        _placement("R1", "1-1", {"1": "1-1", "2": "1-2"}),
+        _placement("R2", "1-5", {"1": "1-5", "2": "1-6"}),
+        _placement("R3", "3-3", {"1": "3-3", "2": "3-4"}),
+    ]
+    components = [
+        Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+        Component(ref="R2", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+        Component(ref="R3", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+    ]
+    nets = [
+        Net(
+            id="BUS",
+            name="BUS",
+            pins=[
+                PinRef(component_ref="R1", pin="1"),
+                PinRef(component_ref="R2", pin="1"),
+                PinRef(component_ref="R3", pin="1"),
+            ],
+            net_class="digital",
+            priority=50,
+        )
+    ]
+    res = route_traces(
+        board_id="test-board",
+        placements=placements,
+        components=components,
+        footprints=PERFBOARD_FOOTPRINTS,
+        nets=nets,
+        graph=g,
+    )
+    total_length = sum(t.estimated_length_mm for t in res.layout.traces)
+    assert len(res.layout.traces) == 2
+    assert total_length < 40.0
+
+
+def test_failed_partial_attempt_does_not_leave_congestion_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    g = maze.build_maze(rows=4, cols=4, pitch_mm=2.54, double_sided=False)
+    placements = [
+        _placement("R1", "1-1", {"1": "1-1", "2": "1-2"}),
+        _placement("R2", "1-4", {"1": "1-4", "2": "1-3"}),
+        _placement("R3", "4-4", {"1": "4-4", "2": "4-3"}),
+    ]
+    components = [
+        Component(ref="R1", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+        Component(ref="R2", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+        Component(ref="R3", value="10k", footprint_id="AXIAL-R", pins=["1", "2"], locked=False, tags=[]),
+    ]
+    nets = [
+        Net(
+            id="BUS",
+            name="BUS",
+            pins=[
+                PinRef(component_ref="R1", pin="1"),
+                PinRef(component_ref="R2", pin="1"),
+                PinRef(component_ref="R3", pin="1"),
+            ],
+            net_class="digital",
+            priority=10,
+        )
+    ]
+    calls = {"count": 0}
+
+    def fake_maze_route(*_args, **_kwargs):
+        calls["count"] += 1
+        if calls["count"] % 2 == 1:
+            return maze.MazeResult(path=["1-1", "1-4"], layers=["top"], cost=1.0, vias=[])
+        return None
+
+    monkeypatch.setattr(maze, "maze_route", fake_maze_route)
+    res = route_traces(
+        board_id="test-board",
+        placements=placements,
+        components=components,
+        footprints=PERFBOARD_FOOTPRINTS,
+        nets=nets,
+        graph=g,
+        max_ripup_iterations=1,
+    )
+    assert res.unrouted_nets == ["BUS"]
+    assert all(edge.usage == 0 for edges in g.edges_top.values() for edge in edges)
+    assert all(edge.usage == 0 for edges in g.edges_bottom.values() for edge in edges)
+
+
 def test_trace_cost_length_only_with_default_weights() -> None:
     t = Trace(
         id="T1",

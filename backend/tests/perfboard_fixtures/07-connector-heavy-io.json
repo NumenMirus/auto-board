@@ -1,0 +1,180 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Perf connector heavy I/O",
+  "board": {
+    "modelId": "strip-20x30-double"
+  },
+  "components": [
+    {
+      "ref": "JIN",
+      "value": "IN",
+      "footprintId": "CONN-1x4",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "JOUT",
+      "value": "OUT",
+      "footprintId": "CONN-1x4",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "U1",
+      "value": "74HC14",
+      "footprintId": "DIP-14",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "C1",
+      "value": "100n",
+      "footprintId": "RADIAL-CAP-2P",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "vcc",
+      "name": "VCC",
+      "pins": [
+        {
+          "componentRef": "JIN",
+          "pin": "1"
+        },
+        {
+          "componentRef": "JOUT",
+          "pin": "1"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "14"
+        },
+        {
+          "componentRef": "C1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "power",
+      "priority": 100,
+      "constraints": []
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "JIN",
+          "pin": "2"
+        },
+        {
+          "componentRef": "JOUT",
+          "pin": "2"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "7"
+        },
+        {
+          "componentRef": "C1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "ground",
+      "priority": 100,
+      "constraints": []
+    },
+    {
+      "id": "io1",
+      "name": "IO1",
+      "pins": [
+        {
+          "componentRef": "JIN",
+          "pin": "3"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "JOUT",
+          "pin": "3"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 80,
+      "constraints": []
+    },
+    {
+      "id": "io2",
+      "name": "IO2",
+      "pins": [
+        {
+          "componentRef": "JIN",
+          "pin": "4"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "3"
+        },
+        {
+          "componentRef": "JOUT",
+          "pin": "4"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 80,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "strip-20x30-double",
+    "placements": [],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 7,
+    "solverPreset": "balanced",
+    "placementWeights": {},
+    "routingWeights": {},
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": [],
+  "schematic": null
+}

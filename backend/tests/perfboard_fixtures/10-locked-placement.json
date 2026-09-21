@@ -1,0 +1,145 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Perf locked placement",
+  "board": {
+    "modelId": "strip-20x30-double"
+  },
+  "components": [
+    {
+      "ref": "R1",
+      "value": "10k",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": true,
+      "tags": []
+    },
+    {
+      "ref": "U1",
+      "value": "74HC04",
+      "footprintId": "DIP-8",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "J1",
+      "value": "IO",
+      "footprintId": "CONN-1x3",
+      "pins": [
+        "1",
+        "2",
+        "3"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "vcc",
+      "name": "VCC",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "8"
+        },
+        {
+          "componentRef": "R1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "power",
+      "priority": 100,
+      "constraints": []
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "4"
+        }
+      ],
+      "netClass": "ground",
+      "priority": 100,
+      "constraints": []
+    },
+    {
+      "id": "sig",
+      "name": "SIG",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "3"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "R1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 70,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "strip-20x30-double",
+    "placements": [
+      {
+        "componentRef": "R1",
+        "anchorHoleId": "2-2",
+        "orientation": 0,
+        "span": 3,
+        "pinHoles": {
+          "1": "2-2",
+          "2": "2-5"
+        },
+        "occupiedHoleIds": [
+          "2-2",
+          "2-3",
+          "2-4",
+          "2-5"
+        ],
+        "locked": true
+      }
+    ],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 7,
+    "solverPreset": "balanced",
+    "placementWeights": {},
+    "routingWeights": {},
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": [],
+  "schematic": null
+}
