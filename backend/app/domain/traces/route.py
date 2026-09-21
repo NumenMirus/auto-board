@@ -265,6 +265,7 @@ def route(
         net_vias: list[Via] = []
         net_succeeded = True
         forbidden: set[tuple[str, str, str]] = set()
+        last_failed_traces: list[Trace] = []
 
         # Try once, then up to max_ripup_iterations rip-ups
         for attempt in range(max_ripup_iterations + 1):
@@ -313,7 +314,9 @@ def route(
                     maze.record_usage(graph, routed)
                 break
             # Rip-up: forbid edges of the k highest-cost traces in this net
-            forbidden |= _ripup_forbidden(cur_traces, graph, DEFAULT_RIPUP_K)
+            if cur_traces:
+                last_failed_traces = list(cur_traces)
+            forbidden |= _ripup_forbidden(last_failed_traces, graph, DEFAULT_RIPUP_K)
         else:
             net_succeeded = False
 
