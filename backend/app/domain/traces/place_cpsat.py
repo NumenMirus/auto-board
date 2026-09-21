@@ -874,7 +874,7 @@ class _CandidateOutcome:
     placement_engine_ms: float
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, order=True)
 class RoutedCandidateRank:
     validation_error_count: int
     unrouted_net_count: int
