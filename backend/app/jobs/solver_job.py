@@ -51,6 +51,7 @@ from app.domain.models import (
     TraceLayout,
 )
 from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS
+from app.domain.traces.solve import route_only as trace_route_only
 from app.domain.traces.solve import solve as trace_solve
 from app.repositories import jobs as jobs_repo
 from app.repositories import layouts as layouts_repo
@@ -587,16 +588,16 @@ async def _run_perfboard_pipeline(
 ) -> _PerfboardPipelineResult:
     """Run the perfboard trace pipeline and return its results.
 
-    Both ``trace-route`` and ``trace-solve`` end up calling the same solver;
-    ``trace-solve`` is treated as ``trace-route`` because the perfboard
-    pipeline does not have a separate placement phase (placements come from
-    the input layout).
+    ``trace-solve`` places every unlocked component then routes the result
+    (`app.domain.traces.solve.solve`); ``trace-route`` routes the placements
+    already present in ``layout`` verbatim, without placing anything
+    (`app.domain.traces.solve.route_only`).
     """
-    _ = op  # the dispatch is implicit; both ops invoke the same pipeline
     initial_layout = TraceLayout(board_id=board.id, placements=list(layout.placements))
+    pipeline = trace_solve if op == "trace-solve" else trace_route_only
     t0 = time.perf_counter()
     solved = await asyncio.to_thread(
-        trace_solve,
+        pipeline,
         board=board,
         footprints=dict(PERFBOARD_FOOTPRINTS),
         components=components,
@@ -606,7 +607,7 @@ async def _run_perfboard_pipeline(
         cancel=cancel,
         progress=progress,
     )
-    timings["trace-solve"] = (time.perf_counter() - t0) * 1000.0
+    timings[op] = (time.perf_counter() - t0) * 1000.0
     for d in solved.diagnostics:
         SOLVER_DIAGNOSTICS_TOTAL.labels(d.severity, d.code).inc()
     return _PerfboardPipelineResult(

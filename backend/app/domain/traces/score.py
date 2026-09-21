@@ -18,6 +18,7 @@ def score_layout(
     components_total: int,
     layout: TraceLayout,
     diagnostics: list[Diagnostic] | None = None,
+    placement_cost: float = 0.0,
 ) -> LayoutScore:
     diagnostics = diagnostics or []
     error_count = sum(1 for d in diagnostics if d.severity == "error")
@@ -26,8 +27,8 @@ def score_layout(
     trace_count = len(layout.traces)
     # Treat each trace as one "jumper" for downstream display consistency.
     return LayoutScore(
-        total=total_length + 5.0 * sum(len(t.vias) for t in layout.traces),
-        placement_cost=0.0,  # placement cost is reported by the breadboard pipeline, not the trace pipeline
+        total=total_length + 5.0 * sum(len(t.vias) for t in layout.traces) + placement_cost,
+        placement_cost=placement_cost,
         routing_cost=total_length,
         components_placed=components_placed,
         components_total=components_total,

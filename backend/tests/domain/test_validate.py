@@ -399,3 +399,25 @@ def test_validator_runs_under_20ms_for_20_components() -> None:
         samples.append((time.perf_counter() - t0) * 1000)
 
     assert min(samples) < 20.0, f"validator too slow: {samples}"
+
+
+# --------------------------------------------------------------------------
+# Rail-backed single-pin nets do not warn; other single-pin nets still do.
+# --------------------------------------------------------------------------
+
+
+def test_single_pin_ground_net_on_railed_board_does_not_warn() -> None:
+    """A GND port wired to one component pin routes to a rail, so it is not a dangling net."""
+    comp, placement = _make_header_component("J1", "a5")
+    gnd = Net(id="net-gnd", name="GND", pins=[PinRef(component_ref="J1", pin="1")],
+              net_class="ground", priority=0)
+    diags, _score = _run([comp], [gnd], [placement], [])
+    assert "NET_SINGLE_PIN" not in _diag_codes(diags)
+
+
+def test_single_pin_signal_net_still_warns() -> None:
+    comp, placement = _make_header_component("J1", "a5")
+    sig = Net(id="net-sig", name="SIG", pins=[PinRef(component_ref="J1", pin="1")],
+              net_class="digital", priority=0)
+    diags, _score = _run([comp], [sig], [placement], [])
+    assert "NET_SINGLE_PIN" in _diag_codes(diags)

@@ -49,6 +49,18 @@ _RAIL_HOLE_RE = re.compile(r"^rail-(?P<line>.+)-(?P<seq>\d+)$")
 _HIGH_CONGESTION_THRESHOLD: int = 6
 
 
+def _is_rail_backed(net: Net) -> bool:
+    """Mirror the router's rail-preference test (`app.domain.route._resolve_net_endpoints`).
+
+    Power/ground nets and explicit `prefer-rail` nets get one endpoint placed on a rail
+    hole, so a single component pin on such a net is a real connection to the rail, not a
+    dangling net.
+    """
+    if net.net_class in ("power", "ground"):
+        return True
+    return any(getattr(c, "type", None) == "prefer-rail" for c in net.constraints)
+
+
 def validate_layout(
     board: BreadboardModel,
     index: BoardIndex,
@@ -104,8 +116,11 @@ def validate_layout(
     # Track every (ref, pin) -> set of net ids seen.
     pin_to_nets: dict[tuple[str, str], set[str]] = defaultdict(set)
     seen_pin_errors: set[tuple[str, str, str]] = set()  # (net, ref, pin) already emitted
+    board_has_rails = any(gid.startswith("rail-") for gid in index.group_ids)
     for net in nets:
-        if len(net.pins) < 2:
+        if len(net.pins) < 2 and not (
+            len(net.pins) == 1 and board_has_rails and _is_rail_backed(net)
+        ):
             diagnostics.append(make_diagnostic("NET_SINGLE_PIN", net=net.id))
         for pin_ref in net.pins:
             ref_comp = components_by_ref.get(pin_ref.component_ref)

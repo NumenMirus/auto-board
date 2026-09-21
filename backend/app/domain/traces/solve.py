@@ -24,10 +24,11 @@ from app.domain.models import (
 )
 from app.domain.traces import maze
 from app.domain.traces import route as trace_route
+from app.domain.traces.place import place as place_perfboard
 from app.domain.traces.score import score_layout
 from app.domain.traces.validate import validate_layout
 
-__all__ = ["SolveResult", "solve"]
+__all__ = ["SolveResult", "route_only", "solve"]
 
 
 @dataclass(slots=True)
@@ -47,32 +48,20 @@ def _initial_layout_from_document(
     return TraceLayout(board_id=doc.board.model_id, placements=placements)
 
 
-def solve(
+def _route_validate_score(
     *,
     board: PerfboardModel,
     footprints: dict[str, ThroughHoleFootprint],
     components: list[Component],
     nets: list[Net],
-    options: SolverOptions,
-    initial_layout: TraceLayout | None = None,
-    cancel: Callable[[], bool] | None = None,
-    progress: Callable[[str, int], None] | None = None,
-) -> SolveResult:
-    """Run the perfboard pipeline: layout (passthrough) → trace-route → validate → score.
-
-    The perfboard pipeline does not run a placement solver of its own — the
-    component positions come from the input layout (which the API layer or
-    the user provides). This keeps Phase 1B focused on the new piece
-    (trace routing) and means the editor can place components freely before
-    requesting a trace-route pass.
+    layout: TraceLayout,
+    placement_cost: float,
+    cancel: Callable[[], bool] | None,
+    progress: Callable[[str, int], None] | None,
+) -> tuple[TraceLayout, LayoutScore, list[Diagnostic], list[str]]:
+    """Route `layout.placements`, validate, and score. Shared tail for both
+    `solve` (place + route) and `route_only` (route against given placements).
     """
-    if progress is not None:
-        progress("validate", 0)
-    layout = initial_layout or TraceLayout(board_id=board.id, placements=[])
-
-    if progress is not None:
-        progress("trace-route", 20)
-
     graph = maze.build_maze(
         rows=board.rows,
         cols=board.cols,
@@ -92,12 +81,10 @@ def solve(
 
     if progress is not None:
         progress("verify", 95)
-
     validation = validate_layout(board, footprints, components, nets, route_result.layout)
 
     if progress is not None:
         progress("score", 99)
-
     placed = {p.component_ref for p in route_result.layout.placements}
     components_placed = sum(1 for c in components if c.ref in placed)
     score = score_layout(
@@ -106,6 +93,106 @@ def solve(
         components_total=len(components),
         layout=route_result.layout,
         diagnostics=validation.diagnostics,
+        placement_cost=placement_cost,
+    )
+    return route_result.layout, score, validation.diagnostics, list(route_result.unrouted_nets)
+
+
+def solve(
+    *,
+    board: PerfboardModel,
+    footprints: dict[str, ThroughHoleFootprint],
+    components: list[Component],
+    nets: list[Net],
+    options: SolverOptions,
+    initial_layout: TraceLayout | None = None,
+    cancel: Callable[[], bool] | None = None,
+    progress: Callable[[str, int], None] | None = None,
+) -> SolveResult:
+    """Run the perfboard pipeline: place → trace-route → validate → score.
+
+    Locked placements in `initial_layout` are kept as-is (mirrors the
+    breadboard placer); every unlocked component is (re)placed from scratch
+    onto the board's plain grid before routing. This is the perfboard
+    counterpart of `app.domain.solve.solve` — the `trace-solve` job operation.
+    """
+    if progress is not None:
+        progress("place", 0)
+    layout = initial_layout or TraceLayout(board_id=board.id, placements=[])
+
+    placement = place_perfboard(
+        board=board,
+        footprints=footprints,
+        components=components,
+        nets=nets,
+        options=options,
+        initial_layout=layout,
+    )
+    placed_layout = TraceLayout(board_id=board.id, placements=placement.placements)
+
+    if progress is not None:
+        progress("trace-route", 20)
+    routed_layout, score, diagnostics, unrouted = _route_validate_score(
+        board=board,
+        footprints=footprints,
+        components=components,
+        nets=nets,
+        layout=placed_layout,
+        placement_cost=placement.cost,
+        cancel=cancel,
+        progress=progress,
+    )
+
+    trace = SolverTrace(
+        seed=options.seed,
+        placement_order=placement.trace.placement_order,
+        pose_choices=placement.trace.pose_choices,
+        rejections=placement.trace.rejections,
+        failed_nets=unrouted,
+        ripups=[],
+        iteration_scores=placement.trace.iteration_scores,
+        phase_timings_ms={**placement.trace.phase_timings_ms, "trace-route": 0.0},
+    )
+
+    if progress is not None:
+        progress("done", 100)
+
+    return SolveResult(
+        layout=routed_layout,
+        score=score,
+        diagnostics=diagnostics,
+        trace=trace,
+    )
+
+
+def route_only(
+    *,
+    board: PerfboardModel,
+    footprints: dict[str, ThroughHoleFootprint],
+    components: list[Component],
+    nets: list[Net],
+    options: SolverOptions,
+    initial_layout: TraceLayout | None = None,
+    cancel: Callable[[], bool] | None = None,
+    progress: Callable[[str, int], None] | None = None,
+) -> SolveResult:
+    """Route the placements already present in `initial_layout` verbatim — no
+    placement phase. This is the `trace-route` job operation: "route only
+    against an existing placement" per `docs/PROJECT_JSON.md`.
+    """
+    if progress is not None:
+        progress("trace-route", 20)
+    layout = initial_layout or TraceLayout(board_id=board.id, placements=[])
+
+    routed_layout, score, diagnostics, unrouted = _route_validate_score(
+        board=board,
+        footprints=footprints,
+        components=components,
+        nets=nets,
+        layout=layout,
+        placement_cost=0.0,
+        cancel=cancel,
+        progress=progress,
     )
 
     trace = SolverTrace(
@@ -113,7 +200,7 @@ def solve(
         placement_order=[c.ref for c in components],
         pose_choices=[],
         rejections=[],
-        failed_nets=list(route_result.unrouted_nets),
+        failed_nets=unrouted,
         ripups=[],
         iteration_scores=[],
         phase_timings_ms={"trace-route": 0.0},
@@ -123,8 +210,8 @@ def solve(
         progress("done", 100)
 
     return SolveResult(
-        layout=route_result.layout,
+        layout=routed_layout,
         score=score,
-        diagnostics=validation.diagnostics,
+        diagnostics=diagnostics,
         trace=trace,
     )

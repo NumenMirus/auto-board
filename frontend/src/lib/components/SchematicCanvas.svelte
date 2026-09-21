@@ -122,12 +122,78 @@
   let ghostPos = $state<{ x: number; y: number } | null>(null);
   let cursorGrid = $state<{ x: number; y: number } | null>(null);
 
+  // ---- View (pan + zoom) ----------------------------------------------------
+  // Content lives inside <g transform="translate(panX,panY) scale(zoom)">.
+  // The outer SVG keeps its fixed viewBox so the visible viewport never
+  // resizes; only the inner transform changes. This keeps drag-to-move-node
+  // and hit-testing math in sheet-grid units — only the visual offset/scale
+  // shifts.
+  const MIN_ZOOM = 0.4;
+  const MAX_ZOOM = 4;
+  const ZOOM_STEP = 1.25;
+  let panX = $state(0);
+  let panY = $state(0);
+  let zoom = $state(1);
+  // Background pan drag state — separate from node drag so a node drag on a
+  // symbol doesn't pan the canvas at the same time.
+  let panning = $state(false);
+  let panStartClient = $state<{ x: number; y: number } | null>(null);
+  let panStartOffset = $state<{ x: number; y: number } | null>(null);
+
+  function clamp(n: number, lo: number, hi: number): number {
+    if (n < lo) return lo;
+    if (n > hi) return hi;
+    return n;
+  }
+
+  function resetView(): void {
+    panX = 0;
+    panY = 0;
+    zoom = 1;
+  }
+
+  function zoomBy(factor: number, anchorClientX?: number, anchorClientY?: number): void {
+    const next = clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
+    if (next === zoom) return;
+    // Zoom around an anchor point (cursor by default) so the world position
+    // under the cursor stays put. Derivation: worldPoint = (client - pan) / zoom.
+    // New pan = client - worldPoint * next.
+    if (anchorClientX !== undefined && anchorClientY !== undefined && rootEl) {
+      const rect = rootEl.getBoundingClientRect();
+      const localX = anchorClientX - rect.left;
+      const localY = anchorClientY - rect.top;
+      // current world point under anchor (in svg-coord units, before scale)
+      const wx = (localX - panX) / zoom;
+      const wy = (localY - panY) / zoom;
+      panX = localX - wx * next;
+      panY = localY - wy * next;
+    } else {
+      // Zoom around the centre of the SVG.
+      if (rootEl) {
+        const rect = rootEl.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        const wx = (cx - panX) / zoom;
+        const wy = (cy - panY) / zoom;
+        panX = cx - wx * next;
+        panY = cy - wy * next;
+      }
+    }
+    zoom = next;
+  }
+
   // ---- Wiring state ---------------------------------------------------------
   let pendingEndpoint = $state<SchematicEndpoint | null>(null);
 
   // ---- Coordinate conversion (mirrors BoardCanvas holeAt shape) ------------
   let rootEl: SVGSVGElement | null = $state(null);
 
+  /**
+   * Map a pointer client position to sheet-grid coordinates, accounting for
+   * the current pan/zoom transform applied to the inner content group.
+   * Uses the SVG element's screen-CTM inverse so the result is correct
+   * regardless of how the inner transform changes between events.
+   */
   function clientToGrid(clientX: number, clientY: number): { x: number; y: number } {
     const svg = rootEl;
     if (!svg) return { x: 0, y: 0 };
@@ -135,17 +201,22 @@
     if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
     const localX = clientX - rect.left;
     const localY = clientY - rect.top;
-    // viewBox starts at (0,0) and spans SHEET_W*SHEET_W etc., so the
-    // world-space coord is the same fraction scaled by sheet extent.
-    const worldX = (localX / rect.width) * SHEET_W;
-    const worldY = (localY / rect.height) * SHEET_H;
-    return { x: worldX, y: worldY };
-  }
-
-  function clamp(n: number, lo: number, hi: number): number {
-    if (n < lo) return lo;
-    if (n > hi) return hi;
-    return n;
+    // Convert local CSS pixels into SVG-world coords (post-pan/zoom) using
+    // the inverse of the SVG's current screen CTM. That gives us the point
+    // in the inner group's local space — which is exactly SHEET_W * scale
+    // units at no zoom, half that at zoom 2×, etc.
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const inverse = ctm.inverse();
+    const svgLocalX = inverse.a * localX + inverse.c * localY + inverse.e;
+    const svgLocalY = inverse.b * localX + inverse.d * localY + inverse.f;
+    // Inner content is in SHEET_W units at scale 1. The inner group's
+    // scale is `zoom`, so divide by (zoom * SCHEMATIC_SCALE) to get grid
+    // units that `terminalOffsets` / `symbolBox` work in.
+    return {
+      x: svgLocalX / (zoom * SCHEMATIC_SCALE),
+      y: svgLocalY / (zoom * SCHEMATIC_SCALE)
+    };
   }
 
   // ---- Node pointer interactions -------------------------------------------
@@ -164,6 +235,11 @@
   function onCanvasPointerMove(event: PointerEvent): void {
     const grid = clientToGrid(event.clientX, event.clientY);
     cursorGrid = grid;
+    if (panning && panStartClient !== null && panStartOffset !== null) {
+      panX = panStartOffset.x + (event.clientX - panStartClient.x);
+      panY = panStartOffset.y + (event.clientY - panStartClient.y);
+      return;
+    }
     if (draggedNodeId !== null && dragGrabOffset !== null) {
       const nx = clamp(grid.x - dragGrabOffset.x, 0, SHEET_W);
       const ny = clamp(grid.y - dragGrabOffset.y, 0, SHEET_H);
@@ -172,6 +248,13 @@
   }
 
   function onCanvasPointerUp(event: PointerEvent): void {
+    if (panning) {
+      panning = false;
+      panStartClient = null;
+      panStartOffset = null;
+      (event.currentTarget as Element).releasePointerCapture?.(event.pointerId);
+      return;
+    }
     if (draggedNodeId === null) return;
     const finalGrid = ghostPos;
     const movedCss =
@@ -187,6 +270,16 @@
     if (movedCss >= 3 && finalGrid !== null) {
       onNodeMove?.(movedId, Math.round(finalGrid.x), Math.round(finalGrid.y));
     }
+  }
+
+  // ---- Wheel zoom -----------------------------------------------------------
+  function onCanvasWheel(event: WheelEvent): void {
+    // Trackpad pinch / ctrl+wheel = zoom. Plain wheel scroll over the
+    // canvas would otherwise leak into page scroll — preventDefault in both
+    // cases so the canvas owns the gesture.
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+    zoomBy(factor, event.clientX, event.clientY);
   }
 
   // ---- Terminal clicks (wiring) --------------------------------------------
@@ -209,11 +302,34 @@
     pendingEndpoint = null;
   }
 
-  function onCanvasClick(event: MouseEvent): void {
-    const target = event.target as Element | null;
-    if (target && target !== rootEl && target.getAttribute('data-schematic-bg') !== '1') {
-      return;
+  // Distance threshold (CSS px) above which a pointer-down/up pair is
+  // treated as a pan instead of a click. Mirrors the node-drag threshold
+  // so single clicks remain crisp.
+  const PAN_THRESHOLD_PX = 3;
+
+  function isBackgroundTarget(target: EventTarget | null): boolean {
+    if (!target || target === rootEl) return true;
+    const el = target as Element;
+    return el.getAttribute?.('data-schematic-bg') === '1';
+  }
+
+  function onCanvasPointerDown(event: PointerEvent): void {
+    // Middle button or primary button on bare background = pan. Primary
+    // button on a node/terminal is handled by the per-element handler.
+    if (event.button === 1 || (event.button === 0 && isBackgroundTarget(event.target))) {
+      event.preventDefault();
+      panning = true;
+      panStartClient = { x: event.clientX, y: event.clientY };
+      panStartOffset = { x: panX, y: panY };
+      (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
     }
+  }
+
+  function onCanvasClick(event: MouseEvent): void {
+    // Suppress the click that fires after a pan drag so the canvas doesn't
+    // also clear the selection (or place a symbol) on release.
+    if (panStartClient !== null || panning) return;
+    if (!isBackgroundTarget(event.target)) return;
     const grid = clientToGrid(event.clientX, event.clientY);
     const x = Math.round(grid.x);
     const y = Math.round(grid.y);
@@ -268,6 +384,15 @@
         onDelete?.(selectedKind, selectedId);
       } else if (key === 'escape') {
         if (pendingEndpoint !== null) pendingEndpoint = null;
+      } else if (key === '+' || key === '=') {
+        event.preventDefault();
+        zoomBy(ZOOM_STEP);
+      } else if (key === '-' || key === '_') {
+        event.preventDefault();
+        zoomBy(1 / ZOOM_STEP);
+      } else if (key === '0') {
+        event.preventDefault();
+        resetView();
       }
     }
     window.addEventListener('keydown', handler);
@@ -328,55 +453,66 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<svg
-  bind:this={rootEl}
-  class="schematic-canvas"
-  viewBox="0 0 {viewBoxW} {viewBoxH}"
-  preserveAspectRatio="xMidYMid meet"
-  role="application"
-  aria-label="Schematic editor canvas"
-  onclick={onCanvasClick}
-  onpointermove={onCanvasPointerMove}
-  onpointerup={onCanvasPointerUp}
-  ondragover={onCanvasDragOver}
-  ondrop={onCanvasDrop}
->
-  <defs>
-    <pattern
-      id="schematic-grid"
-      width={SCHEMATIC_SCALE}
-      height={SCHEMATIC_SCALE}
-      patternUnits="userSpaceOnUse"
-    >
-      <circle
-        cx={(SCHEMATIC_SCALE / 2).toFixed(2)}
-        cy={(SCHEMATIC_SCALE / 2).toFixed(2)}
-        r="0.8"
-        fill="var(--paper-4)"
-      />
-    </pattern>
-  </defs>
+<div class="schematic-root">
+  <svg
+    bind:this={rootEl}
+    class="schematic-canvas"
+    class:dragging={panning}
+    viewBox="0 0 {viewBoxW} {viewBoxH}"
+    preserveAspectRatio="xMidYMid meet"
+    role="application"
+    aria-label="Schematic editor canvas"
+    onclick={onCanvasClick}
+    onpointerdown={onCanvasPointerDown}
+    onpointermove={onCanvasPointerMove}
+    onpointerup={onCanvasPointerUp}
+    onwheel={onCanvasWheel}
+    ondragover={onCanvasDragOver}
+    ondrop={onCanvasDrop}
+  >
+    <defs>
+      <pattern
+        id="schematic-grid"
+        width={SCHEMATIC_SCALE}
+        height={SCHEMATIC_SCALE}
+        patternUnits="userSpaceOnUse"
+      >
+        <circle
+          cx={(SCHEMATIC_SCALE / 2).toFixed(2)}
+          cy={(SCHEMATIC_SCALE / 2).toFixed(2)}
+          r="0.8"
+          fill="var(--paper-4)"
+        />
+      </pattern>
+    </defs>
 
-  <!-- Sheet background: paper, then dot grid. The dot rect carries
-       data-schematic-bg so canvas-level click handlers can recognise a
-       bare-background hit and dispatch click-to-place / clear-selection. -->
-  <rect
-    data-schematic-bg="1"
-    x="0"
-    y="0"
-    width={viewBoxW}
-    height={viewBoxH}
-    fill="var(--paper-0)"
-  />
-  <rect
-    data-schematic-bg="1"
-    x="0"
-    y="0"
-    width={viewBoxW}
-    height={viewBoxH}
-    fill="url(#schematic-grid)"
-    pointer-events="none"
-  />
+    <!-- Everything inside the SVG lives in sheet-grid space; the inner
+         <g class="sheet"> applies the pan/zoom transform so the SVG
+         viewBox itself never needs to change. -->
+    <g class="sheet" transform="translate({panX} {panY}) scale({zoom})">
+      <!-- Sheet background: paper, then dot grid. Both live inside the
+           transform group so they pan/zoom with the rest of the content.
+           The dot rect carries data-schematic-bg so canvas-level click
+           handlers can recognise a bare-background hit and dispatch
+           click-to-place / clear-selection. -->
+      <rect
+        data-schematic-bg="1"
+        x="0"
+        y="0"
+        width={viewBoxW}
+        height={viewBoxH}
+        fill="var(--paper-0)"
+      />
+      <rect
+        data-schematic-bg="1"
+        x="0"
+        y="0"
+        width={viewBoxW}
+        height={viewBoxH}
+        fill="url(#schematic-grid)"
+        pointer-events="none"
+      />
+
 
   <!-- Connections first so nodes paint over them at shared terminals. -->
   <g class="connections">
@@ -572,10 +708,43 @@
         pointer-events="none"
       />
     {/each}
-  </g>
-</svg>
+    </g>
+    </g>
+  </svg>
+
+  <div class="zoom-controls" role="group" aria-label="Schematic view controls">
+    <button
+      type="button"
+      class="zoom-btn"
+      aria-label="Zoom out"
+      title="Zoom out (-)"
+      onclick={() => zoomBy(1 / ZOOM_STEP)}
+    >−</button>
+    <button
+      type="button"
+      class="zoom-btn"
+      aria-label="Reset view"
+      title="Reset view (0)"
+      onclick={resetView}
+    >{Math.round(zoom * 100)}%</button>
+    <button
+      type="button"
+      class="zoom-btn"
+      aria-label="Zoom in"
+      title="Zoom in (+)"
+      onclick={() => zoomBy(ZOOM_STEP)}
+    >+</button>
+  </div>
+</div>
 
 <style>
+  .schematic-root {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+  }
+
   .schematic-canvas {
     width: 100%;
     height: 100%;
@@ -583,6 +752,58 @@
     user-select: none;
     background: var(--paper-0);
     border-radius: var(--r-2);
+    touch-action: none;
+  }
+
+  .schematic-canvas:focus {
+    outline: none;
+  }
+
+  .schematic-canvas.dragging {
+    cursor: grabbing;
+  }
+
+  .zoom-controls {
+    position: absolute;
+    top: var(--sp-2);
+    right: var(--sp-2);
+    display: inline-flex;
+    align-items: stretch;
+    background: var(--paper-0);
+    border: 1px solid var(--paper-edge);
+    border-radius: var(--r-2);
+    box-shadow: var(--sh-1);
+    overflow: hidden;
+    z-index: 1;
+  }
+
+  .zoom-btn {
+    padding: 4px 10px;
+    font-size: var(--fs-12);
+    font-family: var(--font-mono);
+    color: var(--ink-2);
+    background: var(--paper-0);
+    border: none;
+    border-radius: 0;
+    line-height: 1.2;
+  }
+
+  .zoom-btn + .zoom-btn {
+    border-left: 1px solid var(--paper-edge);
+  }
+
+  .zoom-btn:hover:not(:disabled) {
+    background: var(--paper-2);
+    border-color: transparent;
+  }
+
+  .zoom-btn:active:not(:disabled) {
+    background: var(--paper-3);
+  }
+
+  .zoom-btn:focus-visible {
+    outline: 2px solid var(--accent-1);
+    outline-offset: -2px;
   }
 
   .schematic-canvas:focus {

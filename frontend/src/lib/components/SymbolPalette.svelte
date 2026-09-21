@@ -66,21 +66,23 @@
     return `translate(${-box.w / 2}, ${-box.h / 2})`;
   }
 
-  /** Width / height of the inline preview SVG. Slightly larger than the
-   *  symbol bounding box so the row has visual breathing room. */
+  /** Fixed thumbnail box for every palette preview. Uniform rows keep the list
+   *  scannable; the viewBox still spans the full symbol, so the SVG default
+   *  `preserveAspectRatio="xMidYMid meet"` scales each symbol down to fit. */
+  const PREVIEW_W = 40;
+  const PREVIEW_H = 26;
+
   function previewView(shape: PaletteEntry['shape'], pins: readonly string[]): {
     w: number;
     h: number;
     viewBox: string;
   } {
     const box = symbolBox(shape, pins);
-    const w = Math.max(28, box.w * 10);
-    const h = Math.max(20, box.h * 10);
     const padX = 1;
     const padY = 1;
     return {
-      w,
-      h,
+      w: PREVIEW_W,
+      h: PREVIEW_H,
       viewBox: `${-padX} ${-padY} ${box.w + padX * 2} ${box.h + padY * 2}`
     };
   }
@@ -152,7 +154,7 @@
             onclick={() => onArmPort?.(entry.portKind)}
             title={`Drag ${entry.label} onto the schematic`}
           >
-            <svg width="28" height="20" viewBox="0 0 6 4" aria-hidden="true" focusable="false">
+            <svg width={PREVIEW_W} height={PREVIEW_H} viewBox="0 0 6 4" aria-hidden="true" focusable="false">
               {#if entry.portKind === 'ground'}
                 <line x1="3" y1="0" x2="3" y2="1.5" stroke="var(--ink-1)" stroke-width="0.18" />
                 <line x1="1.2" y1="2" x2="4.8" y2="2" stroke="var(--ink-1)" stroke-width="0.28" stroke-linecap="round" />
@@ -183,8 +185,6 @@
     gap: var(--sp-4);
     padding: var(--sp-3);
     background: var(--paper-2);
-    max-height: 48vh;
-    overflow-y: auto;
   }
 
   .group {
@@ -218,7 +218,7 @@
   .row {
     width: 100%;
     display: grid;
-    grid-template-columns: 32px 1fr auto;
+    grid-template-columns: 40px 1fr auto;
     align-items: center;
     gap: var(--sp-2);
     padding: var(--sp-2) var(--sp-3);

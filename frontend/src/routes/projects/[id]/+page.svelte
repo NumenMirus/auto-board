@@ -18,6 +18,7 @@
   import MetricsBar from '$lib/components/MetricsBar.svelte';
   import SafetyNotice from '$lib/components/SafetyNotice.svelte';
   import ExportMenu from '$lib/components/ExportMenu.svelte';
+  import Panel from '$lib/components/Panel.svelte';
   import { projectStore } from '$lib/state/project.svelte';
   import { debounce } from '$lib/debounce';
   import { deriveNetlist, pruneLayout } from '$lib/schematic/netlist';
@@ -63,6 +64,9 @@
   let jumperToolActive = $state(false);
   let selectedNetId = $state<string | null>(null);
   let lastResultLayoutId = $state<string | null>(null);
+  let openPanel = $state<'layout' | 'nets' | 'diagnostics' | 'advanced' | 'export' | null>(null);
+  let openSchematicPanel = $state<'components' | 'properties' | null>('components');
+  let panelInitialised = false;
   let viewMode = $state<'board' | 'schematic'>('board');
   let armedFootprintId = $state<string | null>(null);
   let armedPortKind = $state<SchematicPortKind | null>(null);
@@ -609,9 +613,17 @@
 
   // Derived status for the bottom status bar.
   const boardKindLabel = $derived(projectStore.boardKind === 'perfboard' ? 'Perfboard' : 'Breadboard');
-  const placedCount = $derived(projectStore.document?.layout.placements.length ?? 0);
+  const placedCount = $derived(
+    projectStore.boardKind === 'perfboard'
+      ? (projectStore.traceLayout?.placements.length ?? 0)
+      : (projectStore.document?.layout.placements.length ?? 0)
+  );
   const totalCount = $derived(projectStore.document?.components.length ?? 0);
-  const jumperCount = $derived(projectStore.document?.layout.jumpers.length ?? 0);
+  const jumperCount = $derived(
+    projectStore.boardKind === 'perfboard'
+      ? (projectStore.traceLayout?.traces.length ?? 0)
+      : (projectStore.document?.layout.jumpers.length ?? 0)
+  );
   const errorCount = $derived(projectStore.diagnostics.filter((d) => d.severity === 'error').length);
   const warningCount = $derived(projectStore.diagnostics.filter((d) => d.severity === 'warning').length);
 
@@ -622,6 +634,22 @@
     if (warningCount > 0) return { tone: 'warning', text: `${warningCount} warning${warningCount === 1 ? '' : 's'}` };
     if (projectStore.score !== null) return { tone: 'ok', text: 'Topology valid' };
     return { tone: 'idle', text: 'Idle — make a change to verify' };
+  });
+
+  // Accordion: open whichever panel has the most actionable state on first
+  // load. After that the user drives it. We deliberately only seed once —
+  // re-opening diagnostics after a transient warning clears shouldn't yank
+  // the user back out of whatever they were reading.
+  $effect(() => {
+    if (panelInitialised) return;
+    if (errorCount > 0 || warningCount > 0) {
+      openPanel = 'diagnostics';
+    } else if (projectStore.score !== null) {
+      openPanel = 'layout';
+    } else {
+      openPanel = 'nets';
+    }
+    panelInitialised = true;
   });
 </script>
 
@@ -648,7 +676,13 @@
           role="tab"
           aria-selected={viewMode === 'schematic'}
           class:active={viewMode === 'schematic'}
-          onclick={() => (viewMode = 'schematic')}
+          onclick={() => {
+            viewMode = 'schematic';
+            // Default open Components every time the user enters schematic mode.
+            // Properties stays collapsed until the user picks a node — it shows
+            // an empty inspector otherwise.
+            openSchematicPanel = 'components';
+          }}
         >
           Schematic
         </button>
@@ -657,7 +691,11 @@
           role="tab"
           aria-selected={viewMode === 'board'}
           class:active={viewMode === 'board'}
-          onclick={() => (viewMode = 'board')}
+          onclick={() => {
+            viewMode = 'board';
+            // Don't reset `openPanel` here — the seed effect runs once on first
+            // load. Subsequent board visits honour the user's last choice.
+          }}
         >
           Board
         </button>
@@ -761,10 +799,11 @@
 
       <aside class="ed-sidebar" aria-label="Project sidebar">
         {#if viewMode === 'schematic'}
-          <section class="panel">
-            <header class="panel-header">
-              <h2>Components</h2>
-            </header>
+          <Panel
+            title="Components"
+            open={openSchematicPanel === 'components'}
+            onToggle={() => (openSchematicPanel = openSchematicPanel === 'components' ? null : 'components')}
+          >
             <SymbolPalette
               armedFootprintId={armedFootprintId}
               armedPortKind={armedPortKind}
@@ -777,12 +816,18 @@
                 armedFootprintId = null;
               }}
             />
-          </section>
+          </Panel>
 
-          <section class="panel">
-            <header class="panel-header">
-              <h2>Properties</h2>
-            </header>
+          <Panel
+            title="Properties"
+            open={openSchematicPanel === 'properties'}
+            onToggle={() => (openSchematicPanel = openSchematicPanel === 'properties' ? null : 'properties')}
+          >
+            {#snippet meta()}
+              {#if selectedSchematicNode}
+                <span class="panel-meta mono">{selectedSchematicNode.kind === 'symbol' ? (selectedSchematicNode as { ref: string }).ref : '—'}</span>
+              {/if}
+            {/snippet}
             <SchematicInspector
               node={selectedSchematicNode}
               takenRefs={currentSchematic.nodes
@@ -794,21 +839,25 @@
               onRotate={rotateNode}
               onDelete={deleteSchematicNode}
             />
-          </section>
+          </Panel>
         {:else}
-          <section class="panel">
-            <header class="panel-header">
-              <h2>Layout readout</h2>
-            </header>
+          <Panel
+            title="Layout readout"
+            open={openPanel === 'layout'}
+            onToggle={() => (openPanel = openPanel === 'layout' ? null : 'layout')}
+          >
             <MetricsBar score={projectStore.score} />
-          </section>
+          </Panel>
         {/if}
 
-        <section class="panel">
-          <header class="panel-header">
-            <h2>Nets</h2>
+        <Panel
+          title="Nets"
+          open={openPanel === 'nets'}
+          onToggle={() => (openPanel = openPanel === 'nets' ? null : 'nets')}
+        >
+          {#snippet meta()}
             <span class="panel-meta mono">{projectStore.document.nets.length}</span>
-          </header>
+          {/snippet}
           <NetPanel
             nets={projectStore.document.nets}
             selectedNetId={selectedNetId}
@@ -816,11 +865,14 @@
             onChangeNetClass={changeNetClass}
             onChangePriority={changePriority}
           />
-        </section>
+        </Panel>
 
-        <section class="panel">
-          <header class="panel-header">
-            <h2>Diagnostics</h2>
+        <Panel
+          title="Diagnostics"
+          open={openPanel === 'diagnostics'}
+          onToggle={() => (openPanel = openPanel === 'diagnostics' ? null : 'diagnostics')}
+        >
+          {#snippet meta()}
             <span
               class="panel-meta mono"
               class:has-error={errorCount > 0}
@@ -828,7 +880,7 @@
             >
               {errorCount > 0 ? errorCount : warningCount > 0 ? `!${warningCount}` : '✓'}
             </span>
-          </header>
+          {/snippet}
           <DiagnosticsPanel
             diagnostics={projectStore.diagnostics}
             validated={projectStore.score !== null}
@@ -839,10 +891,14 @@
               }
             }}
           />
-        </section>
+        </Panel>
 
         {#if projectStore.document.settings !== undefined}
-          <section class="panel">
+          <Panel
+            title="Advanced settings"
+            open={openPanel === 'advanced'}
+            onToggle={() => (openPanel = openPanel === 'advanced' ? null : 'advanced')}
+          >
             <AdvancedPanel
               seed={projectStore.document.settings.seed}
               preset={projectStore.document.settings.solverPreset as 'fast' | 'balanced' | 'quality'}
@@ -855,16 +911,17 @@
               onRoutingWeightsChange={updateRoutingWeights}
               onAllowCriticalChange={updateAllowCritical}
             />
-          </section>
+          </Panel>
         {/if}
 
         {#if viewMode === 'board'}
-          <section class="panel">
-            <header class="panel-header">
-              <h2>Export</h2>
-            </header>
+          <Panel
+            title="Export"
+            open={openPanel === 'export'}
+            onToggle={() => (openPanel = openPanel === 'export' ? null : 'export')}
+          >
             <ExportMenu layoutId={lastResultLayoutId} boardKind={projectStore.boardKind} />
-          </section>
+          </Panel>
         {/if}
 
         <SafetyNotice />

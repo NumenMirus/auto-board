@@ -33,17 +33,19 @@
 <section class="advanced-panel">
   <header class="adv-head">
     <div class="title-block">
-      <span class="eyebrow">Solver</span>
       <h3>Advanced settings</h3>
+      <p class="hint">Solver tuning for placement and routing.</p>
     </div>
     <button
       type="button"
-      class="expand"
+      class="disclosure"
       aria-expanded={weightsOpen}
       onclick={() => (weightsOpen = !weightsOpen)}
-      aria-label="Show weight overrides"
     >
-      {weightsOpen ? 'Hide weights' : 'Show weights'}
+      <span>{weightsOpen ? 'Hide weights' : 'Show weights'}</span>
+      <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" focusable="false">
+        <path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
     </button>
   </header>
 
@@ -160,22 +162,16 @@
 
   .adv-head {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: var(--sp-2);
-    padding: var(--sp-3) var(--sp-3) 0;
+    padding: var(--sp-3);
+    border-bottom: 1px solid var(--paper-edge);
+    background: var(--paper-2);
   }
 
   .title-block {
     flex: 1;
-  }
-
-  .eyebrow {
-    display: block;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--ink-3);
-    margin-bottom: 2px;
+    min-width: 0;
   }
 
   h3 {
@@ -183,64 +179,91 @@
     font-size: var(--fs-13);
     font-weight: 600;
     color: var(--ink-1);
+    line-height: 1.25;
   }
 
-  .expand {
+  .hint {
+    margin: 2px 0 0;
+    font-size: var(--fs-11);
+    color: var(--ink-3);
+    line-height: 1.3;
+  }
+
+  .disclosure {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
     font-size: var(--fs-11);
     color: var(--accent-1);
     background: transparent;
-    border: none;
-    padding: 4px 6px;
+    border: 1px solid transparent;
     border-radius: var(--r-2);
+    flex-shrink: 0;
+    margin-top: 1px;
   }
 
-  .expand:hover:not(:disabled) {
+  .disclosure:hover:not(:disabled) {
     background: var(--accent-soft);
+  }
+
+  .disclosure .chev {
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+
+  .disclosure[aria-expanded='true'] .chev {
+    transform: rotate(180deg);
   }
 
   .adv-body {
     padding: var(--sp-3);
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--sp-2);
   }
 
   .row {
     display: grid;
-    grid-template-columns: 64px 1fr;
+    grid-template-columns: 72px minmax(0, 1fr);
     align-items: center;
     gap: var(--sp-2);
+    min-height: 28px;
   }
 
   .row.check {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
+    min-height: 0;
+    padding: 2px 0;
   }
 
   .row label {
-    color: var(--ink-3);
+    color: var(--ink-2);
     font-size: var(--fs-12);
+    line-height: 1.2;
   }
 
   .check-label {
     display: inline-flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     color: var(--ink-2);
     font-size: var(--fs-12);
     cursor: pointer;
-    line-height: 1.3;
+    line-height: 1.35;
   }
 
   .check-label input[type='checkbox'] {
     accent-color: var(--accent-1);
     width: 14px;
     height: 14px;
-    margin: 0;
+    margin: 2px 0 0;
+    flex-shrink: 0;
   }
 
   .seg {
     display: inline-flex;
+    align-self: start;
     border: 1px solid var(--paper-edge);
     border-radius: var(--r-2);
     overflow: hidden;
@@ -248,8 +271,10 @@
   }
 
   .seg-btn {
-    padding: 4px 10px;
+    padding: 4px 0;
+    min-width: 64px;
     font-size: var(--fs-12);
+    font-weight: 500;
     background: transparent;
     border: none;
     color: var(--ink-2);
@@ -260,9 +285,8 @@
     border-left: 1px solid var(--paper-edge);
   }
 
-  .seg-btn:hover:not(:disabled) {
+  .seg-btn:hover:not(:disabled):not(.active) {
     background: var(--paper-2);
-    border-color: transparent;
   }
 
   .seg-btn.active {
