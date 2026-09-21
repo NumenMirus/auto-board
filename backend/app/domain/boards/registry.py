@@ -20,7 +20,14 @@ from app.domain.boards.perfboard import build_perfboard
 from app.domain.errors import InvalidInput
 from app.domain.models import BreadboardModel, PerfboardModel
 
-__all__ = ["BUILTIN_BOARDS", "BUILTIN_PERFBOARDS", "get_board_model", "is_perfboard_id"]
+__all__ = [
+    "BUILTIN_BOARDS",
+    "BUILTIN_PERFBOARDS",
+    "get_board_model",
+    "is_perfboard_id",
+    "PERFBOARD_ID_ALIASES",
+    "resolve_board_id",
+]
 
 
 @lru_cache(maxsize=1)
@@ -51,12 +58,29 @@ def _perfboard_15x20_double() -> PerfboardModel:
 # Id prefix ``strip-`` is the convention for perfboard entries; ``half-``
 # denotes breadboard entries. The dispatch layer (solver_job) keys off the
 # ``strip-`` prefix to pick the trace pipeline.
+#
+# The board-model id namespace is being migrated from the legacy ``strip-``
+# prefix to the more explicit ``perfboard-`` prefix because every entry in
+# this registry is an isolated-hole, two-layer perfboard — the legacy
+# ``strip-`` name is misleading for the actual electrical substrate (see
+# ``docs/perfboard-cpsat-placer.md`` for the rationale). The legacy ids
+# remain registered as primary keys; the new ids are documented aliases
+# that resolve to the same model object.
 BUILTIN_BOARDS: dict[str, BreadboardModel | PerfboardModel] = {
     "half-400-standard-split-rails": _split_rails_board(),
     "half-400-standard-continuous-rails": _continuous_rails_board(),
     "strip-20x30-single": _perfboard_20x30_single(),
     "strip-20x30-double": _perfboard_20x30_double(),
     "strip-15x20-double": _perfboard_15x20_double(),
+}
+
+# Documented aliases — every entry here resolves to the same model as its
+# primary key in ``BUILTIN_BOARDS``. New project documents should use the
+# ``perfboard-*`` namespace; old documents using ``strip-*`` keep working.
+PERFBOARD_ID_ALIASES: dict[str, str] = {
+    "perfboard-20x30-single-sided": "strip-20x30-single",
+    "perfboard-20x30-double-sided": "strip-20x30-double",
+    "perfboard-15x20-double-sided": "strip-15x20-double",
 }
 
 # Subset of BUILTIN_BOARDS containing only perfboard entries — convenient for
@@ -67,18 +91,37 @@ BUILTIN_PERFBOARDS: dict[str, PerfboardModel] = {
 }
 
 
+def resolve_board_id(board_id: str) -> str:
+    """Return the canonical primary key for ``board_id``.
+
+    Both primary ids (``strip-*``) and documented aliases
+    (``perfboard-*``) resolve to the same primary id; unknown ids are
+    returned unchanged so :func:`get_board_model` can raise the
+    :class:`InvalidInput` error.
+    """
+    return PERFBOARD_ID_ALIASES.get(board_id, board_id)
+
+
 def get_board_model(board_id: str) -> BreadboardModel | PerfboardModel:
     """Return the registered board model for ``board_id``.
 
-    Raises ``InvalidInput`` when the id is unknown so callers (API/repositories)
-    can map the failure to the proper API error envelope.
+    Accepts both primary ids (``strip-*``) and documented aliases
+    (``perfboard-*``). Raises ``InvalidInput`` when the resolved primary
+    id is unknown so callers (API/repositories) can map the failure to
+    the proper API error envelope.
     """
-    if board_id not in BUILTIN_BOARDS:
+    canonical = resolve_board_id(board_id)
+    if canonical not in BUILTIN_BOARDS:
         raise InvalidInput(f"Unknown board model {board_id!r}")
-    return BUILTIN_BOARDS[board_id]
+    return BUILTIN_BOARDS[canonical]
 
 
 def is_perfboard_id(board_id: str) -> bool:
-    """Return ``True`` when ``board_id`` resolves to a perfboard entry."""
-    model = BUILTIN_BOARDS.get(board_id)
+    """Return ``True`` when ``board_id`` resolves to a perfboard entry.
+
+    Accepts both primary ids (``strip-*``) and documented aliases
+    (``perfboard-*``).
+    """
+    canonical = resolve_board_id(board_id)
+    model = BUILTIN_BOARDS.get(canonical)
     return model is not None and isinstance(model, PerfboardModel)

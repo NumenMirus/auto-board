@@ -635,6 +635,13 @@
     };
   });
   const totalCount = $derived(projectStore.document?.components.length ?? 0);
+  // Map ref -> Component for the board renderer. Recomputed only when the
+  // components array reference changes, so the renderer doesn't churn.
+  const componentLookup = $derived.by(() => {
+    const list = projectStore.document?.components;
+    if (list === undefined) return undefined;
+    return new Map(list.map((c) => [c.ref, c]));
+  });
   const jumperCount = $derived(
     projectStore.boardKind === 'perfboard'
       ? (projectStore.traceLayout?.traces.length ?? 0)
@@ -794,6 +801,7 @@
             <BoardCanvas
               board={projectStore.board}
               layout={boardLayout}
+              {componentLookup}
               showLabels={true}
               jumperToolActive={jumperToolActive}
               jumperStartHoleId={null}
@@ -869,7 +877,9 @@
           onToggle={() => (openPanel = openPanel === 'nets' ? null : 'nets')}
         >
           {#snippet meta()}
-            <span class="panel-meta mono">{projectStore.document.nets.length}</span>
+            {#if projectStore.document}
+              <span class="panel-meta mono">{projectStore.document.nets.length}</span>
+            {/if}
           {/snippet}
           <NetPanel
             nets={projectStore.document.nets}

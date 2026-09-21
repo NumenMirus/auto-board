@@ -17,6 +17,7 @@ engines based on the option value.
 from __future__ import annotations
 
 import dataclasses
+import math
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -64,6 +65,7 @@ __all__ = [
     "build_cpsat_model",
     "add_objective_terms",
     "solve_cpsat_placement",
+    "solve_status_from_code",
 ]
 
 
@@ -82,6 +84,15 @@ _HOT_BIN_THRESHOLD: int = 3  # bin becomes "hot" once >= N components touch it
 # Boolean products. The cap keeps it bounded and the proximity-sort keeps
 # the model's optimal-direction intact.
 _NET_PAIR_K: int = 40
+# Tighter cap for the *pin-level* cluster proximity term added on top of
+# the existing centroid-based cluster term. Each member contributes
+# ``_CLUSTER_PIN_K²`` Boolean products; with 200 candidates per
+# component and a 7-member cluster that's ~3 k extra products per
+# member. ``8`` keeps the flagship 8-component + 200-candidate fixture
+# solvable in the default 10 s budget while still giving the
+# pin-anchored term enough candidate diversity to drive
+# functional-cluster locality.
+_CLUSTER_PIN_K: int = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +109,12 @@ class CpsatWeights:
     cluster: int = 3
     decoupler: int = 24  # 8x cluster, applied only to bypass caps
     compactness: int = 1
+    bbox_span: int = 12  # origin-neutral 2D penalty: (x_span + y_span)
+    bbox_area: int = 1  # bounding-box area (loose tie-breaker)
+    anti_line: int = 60  # soft penalty when min(x_span, y_span) collapses
+    pin_proximity: int = 8  # extra weight on pin-pair Manhattan (cluster)
+    row_wall: int = 30  # penalize many components sharing a single row
+    dip_escape: int = 4  # penalize a candidate cell too close to a DIP pin
     edge: int = 10
     orientation: int = 1
     congestion: int = 2
@@ -479,11 +496,25 @@ def build_cpsat_model(
 class PlacementObjectiveBreakdown:
     """Per-term integer costs of the final CP-SAT solution. Units are
     ``_MILLIMETRE_SCALE``-scaled Manhattan (so ``net_length`` is in 1/100 mm).
-    Always non-negative."""
+    Always non-negative.
+
+    The ``bbox_span`` and ``anti_line`` terms are *post-solve* deterministic
+    costs derived from the chosen candidate bboxes — they are not in the
+    CP-SAT linearised objective because modelling ``min(x_span, y_span)``
+    cleanly requires cross-candidate pair products that explode the model.
+    The post-solve penalty participates in candidate ranking but does not
+    influence CP-SAT's choice of pose per component.
+    """
 
     net_length: int = 0
     cluster_spread: int = 0
+    pin_proximity: int = 0
     compactness: int = 0
+    bbox_span: int = 0
+    bbox_area: int = 0
+    anti_line: int = 0
+    row_wall: int = 0
+    dip_escape: int = 0
     edge: int = 0
     orientation: int = 0
     congestion: int = 0
@@ -494,7 +525,13 @@ class PlacementObjectiveBreakdown:
         return {
             "netLength": self.net_length,
             "clusterSpread": self.cluster_spread,
+            "pinProximity": self.pin_proximity,
             "compactness": self.compactness,
+            "bboxSpan": self.bbox_span,
+            "bboxArea": self.bbox_area,
+            "antiLine": self.anti_line,
+            "rowWall": self.row_wall,
+            "dipEscape": self.dip_escape,
             "edge": self.edge,
             "orientation": self.orientation,
             "congestion": self.congestion,
@@ -795,6 +832,51 @@ def add_objective_terms(
                 d = _manhattan_q(ca.centroid_q, cm.centroid_q)
                 terms.append(w * d * z)
 
+    # ---- 2b. Pin-level cluster proximity (centroid + nearest pin) ----
+    # Stronger, pin-anchored cluster term: for each cluster member,
+    # minimise the Manhattan distance from the member's closest pin to
+    # the anchor's closest pin. This drives functional-cluster locality
+    # even when the two components' body centroids are close but the
+    # *connecting* pin sits on the far side of the package.
+    #
+    # Bounded by ``_CLUSTER_PIN_K`` (smaller than ``_NET_PAIR_K``) — the
+    # cluster pair products already include the centroid-based pair, and
+    # doubling the per-member pair count blows up the model on flagship
+    # fixtures. ``12`` is the largest value that keeps a 6-component +
+    # 200-candidate fixture under the 4 s solve budget.
+    for member_ref, anchor_ref in cluster_anchor_of.items():
+        if member_ref == anchor_ref:
+            continue
+        if member_ref not in candidates or anchor_ref not in candidates:
+            continue
+        w = weights.decoupler if is_decoupler.get(member_ref, False) else weights.cluster
+        anchor_cands = candidates[anchor_ref]
+        member_cands = candidates[member_ref]
+        _k = min(_CLUSTER_PIN_K, len(anchor_cands), len(member_cands))
+        anchor_top = sorted(
+            anchor_cands,
+            key=lambda c_a: _manhattan_q(c_a.pin_centroid_q, member_cands[0].pin_centroid_q),
+        )[:_k]
+        member_top = sorted(
+            member_cands,
+            key=lambda c_m: _manhattan_q(c_m.pin_centroid_q, anchor_cands[0].pin_centroid_q),
+        )[:_k]
+        for ca in anchor_top:
+            for cm in member_top:
+                z = model.NewBoolVar(
+                    f"clpin_{anchor_ref}_{ca.pose_id}_{member_ref}_{cm.pose_id}"
+                )
+                model.Add(z <= sel_vars[anchor_ref][ca.pose_id])
+                model.Add(z <= sel_vars[member_ref][cm.pose_id])
+                model.Add(
+                    z
+                    >= sel_vars[anchor_ref][ca.pose_id]
+                    + sel_vars[member_ref][cm.pose_id]
+                    - 1
+                )
+                d = _manhattan_q(ca.pin_centroid_q, cm.pin_centroid_q)
+                terms.append(w * d * z)
+
     # ---- 3. Compactness ----
     anchor_centroid = _anchor_centroid_q(locked_placements, board)
     for ref, cands in candidates.items():
@@ -923,14 +1005,44 @@ class _CandidateOutcome:
     validation_diagnostics: list[Diagnostic]
     placement_status: str  # "FEASIBLE" | "INVALID" | "INFEASIBLE"
     placement_engine_ms: float
+    # Post-solve physical metrics — populated alongside the routed outcome
+    # so the candidate ranker can break ties / penalise degenerate layouts.
+    x_span: int = 0
+    y_span: int = 0
+    min_span: int = 0
+    max_components_per_row: int = 0
+    dip_escape_violations: int = 0
+    single_pin_net_count: int = 0
+    validation_error_count: int = 0
 
 
 @dataclass(frozen=True, slots=True, order=True)
 class RoutedCandidateRank:
+    """Lexicographic rank key for a routed candidate.
+
+    Order (left = wins):
+        1. ``validation_error_count``   (must be zero to win)
+        2. ``single_pin_net_count``     (must be zero to be fully routed)
+        3. ``unrouted_net_count``
+        4. ``min_span``                 (penalty asc; tiny span = line collapse)
+        5. ``max_components_per_row``   (penalty asc; high = row wall)
+        6. ``dip_escape_violations``    (penalty asc; block-traced cells)
+        7. ``via_count``
+        8. ``trace_length_units``
+        9. ``segment_count``
+       10. ``routing_cost_units``
+       11. ``placement_proxy_score``    (final tie-breaker)
+       12. ``candidate_index``          (deterministic final tie-breaker)
+    """
+
     validation_error_count: int
+    single_pin_net_count: int
     unrouted_net_count: int
-    trace_length_units: float
+    min_span: int
+    max_components_per_row: int
+    dip_escape_violations: int
     via_count: int
+    trace_length_units: float
     segment_count: int
     routing_cost_units: float
     placement_proxy_score: int
@@ -976,6 +1088,20 @@ def _evaluate_candidate(
     via_count = sum(len(t.vias) for t in route_result.layout.traces)
     trace_length_mm = sum(t.estimated_length_mm for t in route_result.layout.traces)
     segment_count = sum(len(t.segments) for t in route_result.layout.traces)
+    single_pin_net_count = sum(1 for d in validation.diagnostics if d.code == "NET_SINGLE_PIN")
+    # Physical layout metrics. Computed from the *placement* (not the routed
+    # layout) so degenerate row-collapses are visible even when routing
+    # somehow succeeds.
+    component_by_ref = {c.ref: c for c in components}
+    chosen_for_metrics: dict[str, CandidatePose] = {}
+    for p in candidate:
+        comp = component_by_ref.get(p.component_ref)
+        footprint_id = comp.footprint_id if comp else ""
+        chosen_for_metrics[p.component_ref] = _placement_to_metric_pose(p, footprint_id)
+    _min_col, _min_row, _max_col, _max_row, x_span, y_span = _placement_bbox_span(chosen_for_metrics)
+    min_span = min(x_span, y_span)
+    max_per_row, _ = _row_distribution(chosen_for_metrics)
+    dip_escape = _dip_pin_escape_violations(chosen_for_metrics, board)
     return _CandidateOutcome(
         candidate_index=candidate_index,
         placements=candidate,
@@ -989,6 +1115,13 @@ def _evaluate_candidate(
         validation_diagnostics=validation.diagnostics,
         placement_status="INVALID" if placement_errors else "FEASIBLE",
         placement_engine_ms=placement_engine_ms,
+        x_span=x_span,
+        y_span=y_span,
+        min_span=min_span,
+        max_components_per_row=max_per_row,
+        dip_escape_violations=dip_escape,
+        single_pin_net_count=single_pin_net_count,
+        validation_error_count=len(placement_errors),
     )
 
 
@@ -998,17 +1131,24 @@ def progress_marker(layout: TraceLayout) -> int:
 
 
 def _rank_outcomes(outcomes: list[_CandidateOutcome]) -> _CandidateOutcome:
-    """Rank candidates by actual routed quality before proxy quality."""
+    """Rank candidates by actual routed quality, with structural / pin-level
+    metrics as tie-breakers and the CP-SAT proxy score as the final fallback.
 
-    def validation_error_count(outcome: _CandidateOutcome) -> int:
-        return sum(1 for d in outcome.validation_diagnostics if d.severity == "error")
+    The lexicographic key is :class:`RoutedCandidateRank`; lower wins on every
+    field. ``candidate_index`` is the deterministic final tie-breaker so
+    two equally-routed candidates always resolve to the same choice.
+    """
 
     def rank(outcome: _CandidateOutcome) -> RoutedCandidateRank:
         return RoutedCandidateRank(
-            validation_error_count=validation_error_count(outcome),
+            validation_error_count=outcome.validation_error_count,
+            single_pin_net_count=outcome.single_pin_net_count,
             unrouted_net_count=len(outcome.unrouted_nets),
-            trace_length_units=outcome.trace_length_mm,
+            min_span=outcome.min_span,
+            max_components_per_row=outcome.max_components_per_row,
+            dip_escape_violations=outcome.dip_escape_violations,
             via_count=outcome.via_count,
+            trace_length_units=outcome.trace_length_mm,
             segment_count=outcome.segment_count,
             routing_cost_units=outcome.trace_cost,
             placement_proxy_score=outcome.proxy_breakdown.total,
@@ -1096,6 +1236,150 @@ def index_hole_id(cand: CandidatePose) -> str:
     return _hole_id_for_anchor(cand)
 
 
+def _placement_bbox_span(chosen: Mapping[str, CandidatePose]) -> tuple[int, int, int, int, int, int]:
+    """Return ``(min_col, min_row, max_col, max_row, x_span, y_span)`` over the
+    union of every chosen candidate's occupied holes, plus a min(x_span, y_span).
+
+    Translation of an equivalent arrangement to another board region does not
+    change the spans — they are origin-neutral, which is the desired
+    compactness invariant per the perfboard edge-collapse brief.
+    """
+    if not chosen:
+        return 0, 0, 0, 0, 0, 0
+    cols: list[int] = []
+    rows: list[int] = []
+    for cand in chosen.values():
+        for hid in cand.occupied_hole_ids:
+            row_str, col_str = hid.split("-", 1)
+            cols.append(int(col_str))
+            rows.append(int(row_str))
+    if not cols:
+        return 0, 0, 0, 0, 0, 0
+    min_col, max_col = min(cols), max(cols)
+    min_row, max_row = min(rows), max(rows)
+    x_span = max(0, max_col - min_col)
+    y_span = max(0, max_row - min_row)
+    return min_col, min_row, max_col, max_row, x_span, y_span
+
+
+def _row_distribution(chosen: Mapping[str, CandidatePose]) -> tuple[int, int]:
+    """Return ``(max_components_per_row, components_in_max_row)`` for the chosen
+    placements. Used to drive the row-wall anti-collapse penalty.
+    """
+    if not chosen:
+        return 0, 0
+    by_row: dict[int, set[str]] = {}
+    for ref, cand in chosen.items():
+        for hid in cand.occupied_hole_ids:
+            row_str, _col_str = hid.split("-", 1)
+            by_row.setdefault(int(row_str), set()).add(ref)
+    if not by_row:
+        return 0, 0
+    counts = sorted((len(refs) for refs in by_row.values()), reverse=True)
+    return counts[0], counts[0]
+
+
+def _dip_pin_escape_violations(
+    chosen: Mapping[str, CandidatePose],
+    board: PerfboardModel,
+    *,
+    escape_holes: int = 1,
+) -> int:
+    """Count cells a non-DIP candidate occupies within the DIP-pin escape
+    corridor (default 1 hole around any DIP pin). The corridor is the
+    set of cells immediately adjacent to a DIP pin on the same board —
+    a trace needs at least one free hole next to each DIP pin to leave
+    the package without jumping over its body.
+
+    Returns the total count of (candidate, corridor-cell) pairs that
+    intrude into the escape region. Multiple cell intrusions from one
+    candidate each count once.
+    """
+    dip_pins: set[tuple[int, int]] = set()
+    for cand in chosen.values():
+        if not cand.footprint_id.startswith("DIP-"):
+            continue
+        for _pid, hid in cand.pin_holes:
+            row_str, col_str = hid.split("-", 1)
+            dip_pins.add((int(row_str), int(col_str)))
+    if not dip_pins:
+        return 0
+    corridor: set[tuple[int, int]] = set()
+    for row, col in dip_pins:
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if dr == 0 and dc == 0:
+                    continue
+                rr = row + dr
+                cc = col + dc
+                if 1 <= rr <= board.rows and 1 <= cc <= board.cols:
+                    if abs(dr) + abs(dc) <= escape_holes:
+                        corridor.add((rr, cc))
+    # Drop cells the DIP itself occupies — those aren't escape corridors.
+    dip_occupied: set[tuple[int, int]] = set()
+    for cand in chosen.values():
+        if not cand.footprint_id.startswith("DIP-"):
+            continue
+        for hid in cand.occupied_hole_ids:
+            row_str, col_str = hid.split("-", 1)
+            dip_occupied.add((int(row_str), int(col_str)))
+    corridor -= dip_occupied
+    if not corridor:
+        return 0
+    violations = 0
+    for cand in chosen.values():
+        if cand.footprint_id.startswith("DIP-"):
+            continue  # don't penalise DIP-on-DIP stacking here
+        for hid in cand.occupied_hole_ids:
+            row_str, col_str = hid.split("-", 1)
+            if (int(row_str), int(col_str)) in corridor:
+                violations += 1
+    return violations
+
+
+def _pin_pair_proximity(
+    chosen: Mapping[str, CandidatePose],
+    nets: list[Net],
+    *,
+    max_pairs_per_net: int = 4,
+) -> int:
+    """Pin-hole Manhattan distance between every net pin pair (capped).
+
+    Distinct from ``net_length`` (hub-based) — this drives the
+    pin-level proximity term that bounds how far apart two physically-
+    local pins can be. Only the closest ``max_pairs_per_net`` pin pairs
+    per net contribute so a 6-pin net does not blow up the model.
+    """
+    pairs: list[tuple[int, tuple[int, int], tuple[int, int]]] = []
+    for net in nets:
+        pin_locs: list[tuple[int, int]] = []
+        for pin in net.pins:
+            cand = chosen.get(pin.component_ref)
+            if cand is None:
+                continue
+            for pid, hid in cand.pin_holes:
+                if pid != pin.pin:
+                    continue
+                row_str, col_str = hid.split("-", 1)
+                pin_locs.append((int(row_str), int(col_str)))
+                break
+        if len(pin_locs) < 2:
+            continue
+        # Closest pairs only.
+        local_pairs: list[tuple[int, tuple[int, int], tuple[int, int]]] = []
+        for i, a in enumerate(pin_locs):
+            for b in pin_locs[i + 1 :]:
+                d = abs(a[0] - b[0]) + abs(a[1] - b[1])
+                local_pairs.append((d, a, b))
+        local_pairs.sort()
+        for d, a, b in local_pairs[:max_pairs_per_net]:
+            pairs.append((d, a, b))
+    total = 0
+    for d, _a, _b in pairs:
+        total += d
+    return total
+
+
 def _recompute_breakdown(
     chosen: Mapping[str, CandidatePose],
     locked_placements: list[ComponentPlacement],
@@ -1140,7 +1424,8 @@ def _recompute_breakdown(
             d = _manhattan_q(hub_cand.pin_centroid_q, other_cand.pin_centroid_q)
             breakdown.net_length += weights.net * d
 
-    # 2. Cluster proximity.
+    # 2. Cluster proximity (centroid-based — captures the rough geographic
+    #    layout around an anchor).
     clusters = build_clusters(components, nets, fp_lookup)
     cluster_anchor_of: dict[str, str] = {}
     for cluster in clusters:
@@ -1157,11 +1442,59 @@ def _recompute_breakdown(
         w = weights.decoupler if _footprint_of(member_ref, components) in _DECOUPLER_FOOTPRINTS else weights.cluster
         breakdown.cluster_spread += w * _manhattan_q(ca.centroid_q, cm.centroid_q)
 
-    # 3. Compactness.
+    # 2b. Pin-pair proximity (the closest 4 pin pairs per net). Captures
+    #     the high-priority local connections between two specific pins,
+    #     independent of which is the hub.
+    breakdown.pin_proximity = weights.pin_proximity * _pin_pair_proximity(chosen, nets)
+
+    # 3. Compactness — kept as a low-weight anchor term so the candidate
+    #    has a deterministic centre of mass to drift toward, but the
+    #    origin-neutral bbox term below carries the main 2D signal.
     anchor_centroid = _anchor_centroid_q(locked_placements, board)
     for ref, cand in chosen.items():
         d = _manhattan_q(cand.centroid_q, anchor_centroid)
         breakdown.compactness += weights.compactness * d
+
+    # 3b. Origin-neutral 2D bbox penalty + anti-line-collapse penalty.
+    #     Computed once per candidate (not per pair) — stays cheap.
+    if chosen:
+        _min_col, _min_row, _max_col, _max_row, x_span, y_span = _placement_bbox_span(chosen)
+        # bbox span is in lattice steps; multiply by 1/100 mm to keep
+        # the same integer-unit scale as the rest of the breakdown.
+        breakdown.bbox_span = weights.bbox_span * int(
+            round((x_span + y_span) * 2.54 * _MILLIMETRE_SCALE)
+        )
+        breakdown.bbox_area = weights.bbox_area * int(
+            round((x_span + 1) * (y_span + 1) * (2.54 * _MILLIMETRE_SCALE) ** 2 / _MILLIMETRE_SCALE)
+        )
+        # Anti-line collapse: soft penalty when min(x_span, y_span) is
+        # small relative to the other axis. Threshold scales with the
+        # number of movable components so an 8-component circuit with
+        # span (16, 1) is decisively penalised, while a deliberately
+        # linear header strip is left alone because the
+        # ``linear_components`` exemption below zeroes its contribution.
+        n_movable = len(chosen)
+        if n_movable >= 2:
+            lo, hi = sorted((x_span, y_span))
+            # Threshold: a 2D cluster's smaller axis should be at least
+            # ceil(sqrt(n_movable) / 2) holes for n >= 4. Below that,
+            # pay the anti-line penalty proportional to the deficit.
+            threshold = max(1, int(math.ceil(math.sqrt(n_movable) / 2)))
+            if lo < threshold:
+                breakdown.anti_line = weights.anti_line * (threshold - lo) * n_movable
+
+    # 3c. Row-wall penalty: many components sharing a single row.
+    if chosen and not _is_linear_layout_allowed(chosen, fp_lookup):
+        max_per_row, _ = _row_distribution(chosen)
+        n_movable = len(chosen)
+        # More than ~40 % of movable components in one row triggers a
+        # penalty that grows quadratically with the excess.
+        if max_per_row > max(2, n_movable * 2 // 5):
+            excess = max_per_row - max(2, n_movable * 2 // 5)
+            breakdown.row_wall = weights.row_wall * excess * excess
+
+    # 3d. DIP-pin escape corridor penalty.
+    breakdown.dip_escape = weights.dip_escape * _dip_pin_escape_violations(chosen, board)
 
     # 4. Edge.
     for ref, cand in chosen.items():
@@ -1213,13 +1546,72 @@ def _recompute_breakdown(
     breakdown.total = (
         breakdown.net_length
         + breakdown.cluster_spread
+        + breakdown.pin_proximity
         + breakdown.compactness
+        + breakdown.bbox_span
+        + breakdown.bbox_area
+        + breakdown.anti_line
+        + breakdown.row_wall
+        + breakdown.dip_escape
         + breakdown.edge
         + breakdown.orientation
         + breakdown.congestion
         + breakdown.mechanical
     )
     return breakdown
+
+
+def _is_linear_layout_allowed(
+    chosen: Mapping[str, CandidatePose],
+    footprints: Mapping[str, ThroughHoleFootprint],
+) -> bool:
+    """Return True when the chosen set is legitimately linear — a header,
+    connector bank, or LED bar whose footprint profile is long in one axis.
+
+    The row-wall penalty is suppressed for these because a single-row
+    arrangement is the user's intent, not a solver artefact.
+    """
+    if not chosen:
+        return True
+    eligible_linear = 0
+    eligible_non_linear = 0
+    for ref, cand in chosen.items():
+        fp = footprints.get(cand.footprint_id)
+        if fp is None:
+            eligible_non_linear += 1
+            continue
+        if _is_connector_or_header(cand.footprint_id) or cand.footprint_id.startswith("LED"):
+            eligible_linear += 1
+        else:
+            eligible_non_linear += 1
+    # All linear-eligible, no IC/passive → linear layout allowed.
+    return eligible_non_linear == 0
+
+
+def _placement_to_metric_pose(p: ComponentPlacement, footprint_id: str = "") -> CandidatePose:
+    """Synthesise a minimal CandidatePose from a canonical ComponentPlacement
+    so the bbox / row-distribution / dip-escape helpers can run on
+    post-routing placement lists (which only carry ComponentPlacement).
+
+    The synthesised pose only exposes the fields those helpers read:
+    ``bbox``, ``occupied_hole_ids``, ``pin_holes``, ``footprint_id``.
+    Centroid / pin-centroid stay at (0, 0) because they aren't needed.
+    """
+    return CandidatePose(
+        component_ref=p.component_ref,
+        pose_id=-1,
+        anchor_idx=-1,
+        orientation=p.orientation,
+        span=p.span,
+        pin_holes=tuple(sorted(p.pin_holes.items(), key=lambda kv: kv[0])),
+        body_hole_ids=tuple(p.occupied_hole_ids),
+        occupied_hole_ids=frozenset(p.occupied_hole_ids),
+        centroid_q=(0, 0),
+        mech_cost_q=0,
+        bbox=_bbox_for_holes(p.occupied_hole_ids),
+        pin_centroid_q=(0, 0),
+        footprint_id=footprint_id,
+    )
 
 
 def _locked_cand(
@@ -1651,6 +2043,7 @@ def solve_cpsat_placement(
             progress=progress,
             proxy_breakdown=greedy_breakdown,
             placement_engine_ms=round((time.perf_counter() - t_start) * 1000.0, 3),
+            candidate_index=len(outcomes),
         )
         if greedy_outcome is not None:
             outcomes.append(greedy_outcome)
@@ -1671,6 +2064,23 @@ def solve_cpsat_placement(
         for p in final_placements
         if p.component_ref not in locked_refs
     ]
+    # Solve status — the brief distinguishes:
+    #   * ``invalid-netlist`` — at least one NET_SINGLE_PIN net (or
+    #     validation reported a hard error). Solver cannot claim a
+    #     fully-solved status while this is the case.
+    #   * ``placement-feasible-routing-incomplete`` — placement feasible
+    #     but at least one required net did not route.
+    #   * ``fully-routed-valid`` — all nets routed, zero validation
+    #     errors, zero single-pin warnings.
+    if best.validation_error_count > 0:
+        solve_status = "invalid-netlist"
+    elif best.single_pin_net_count > 0:
+        solve_status = "invalid-netlist"
+    elif len(best.unrouted_nets) > 0:
+        solve_status = "placement-feasible-routing-incomplete"
+    else:
+        solve_status = "fully-routed-valid"
+
     phase_timings = {
         "place": round((time.perf_counter() - t_start) * 1000.0, 3),
         "cpsat_solution_count": len(collected),
@@ -1683,6 +2093,13 @@ def solve_cpsat_placement(
         "cpsat_trace_count": best.trace_count,
         "cpsat_segment_count": best.segment_count,
         "cpsat_unrouted_count": len(best.unrouted_nets),
+        "cpsat_solve_status": _SOLVE_STATUS_CODES.get(solve_status, 2),
+        "cpsat_x_span": best.x_span,
+        "cpsat_y_span": best.y_span,
+        "cpsat_min_span": best.min_span,
+        "cpsat_max_components_per_row": best.max_components_per_row,
+        "cpsat_dip_escape_violations": best.dip_escape_violations,
+        "cpsat_single_pin_net_count": best.single_pin_net_count,
     }
     # Stash per-term breakdown into phase_timings_ms under prefixed keys.
     bd = best.proxy_breakdown.as_dict()
@@ -1709,3 +2126,26 @@ def solve_cpsat_placement(
         trace=trace,
         cost=float(proxy_total) / _MILLIMETRE_SCALE,
     )
+
+
+# --------------------------------------------------------------------------
+# Solve status encoding
+# --------------------------------------------------------------------------
+
+# Stable numeric encoding so the trace key can carry a numeric value while
+# the API surface still reads ``"fully-routed-valid"`` etc. The numbers are
+# arbitrary but stable; readers should consult the
+# :func:`solve_status_from_code` helper to decode.
+_SOLVE_STATUS_CODES: Mapping[str, int] = {
+    "invalid-netlist": 0,
+    "placement-feasible-routing-incomplete": 1,
+    "fully-routed-valid": 2,
+}
+
+
+def solve_status_from_code(code: int) -> str:
+    """Decode the numeric ``cpsat_solve_status`` trace key back to a string."""
+    for name, value in _SOLVE_STATUS_CODES.items():
+        if value == code:
+            return name
+    return "unknown"

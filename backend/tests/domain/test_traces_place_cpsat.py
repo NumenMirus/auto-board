@@ -407,8 +407,64 @@ def test_route_first_ranking_prefers_routable_candidate_over_better_proxy() -> N
 
 
 def test_routed_candidate_rank_orders_validation_then_routing_then_proxy() -> None:
-    a = RoutedCandidateRank(1, 0, 100, 0, 1, 100, 0, 0)
-    b = RoutedCandidateRank(0, 1, 10, 0, 1, 10, 0, 1)
-    c = RoutedCandidateRank(0, 0, 200, 0, 1, 200, 0, 2)
-    d = RoutedCandidateRank(0, 0, 200, 0, 1, 200, 10, 3)
+    # Same-rank tie-breaks go to lower (min_span, max_components_per_row,
+    # dip_escape_violations) before proxy cost and candidate_index.
+    a = RoutedCandidateRank(
+        validation_error_count=1,
+        single_pin_net_count=0,
+        unrouted_net_count=0,
+        min_span=100,
+        max_components_per_row=0,
+        dip_escape_violations=1,
+        via_count=0,
+        trace_length_units=100.0,
+        segment_count=1,
+        routing_cost_units=100.0,
+        placement_proxy_score=0,
+        candidate_index=0,
+    )
+    b = RoutedCandidateRank(
+        validation_error_count=0,
+        single_pin_net_count=0,
+        unrouted_net_count=1,
+        min_span=10,
+        max_components_per_row=0,
+        dip_escape_violations=1,
+        via_count=0,
+        trace_length_units=10.0,
+        segment_count=1,
+        routing_cost_units=10.0,
+        placement_proxy_score=0,
+        candidate_index=1,
+    )
+    # Winner: zero errors, zero unrouted, span 200 (legal, not collapsed),
+    # zero row-wall, zero DIP escape, then beats `d` via lower proxy.
+    c = RoutedCandidateRank(
+        validation_error_count=0,
+        single_pin_net_count=0,
+        unrouted_net_count=0,
+        min_span=200,
+        max_components_per_row=1,
+        dip_escape_violations=0,
+        via_count=0,
+        trace_length_units=200.0,
+        segment_count=1,
+        routing_cost_units=200.0,
+        placement_proxy_score=0,
+        candidate_index=2,
+    )
+    d = RoutedCandidateRank(
+        validation_error_count=0,
+        single_pin_net_count=0,
+        unrouted_net_count=0,
+        min_span=200,
+        max_components_per_row=1,
+        dip_escape_violations=0,
+        via_count=0,
+        trace_length_units=200.0,
+        segment_count=1,
+        routing_cost_units=200.0,
+        placement_proxy_score=10,
+        candidate_index=3,
+    )
     assert min([a, b, c, d]) is c

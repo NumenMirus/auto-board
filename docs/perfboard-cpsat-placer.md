@@ -71,13 +71,29 @@ All terms are integer (millimetre × 100). Weights and term definitions:
 | Term                | Weight | Source                                                       |
 |---------------------|-------:|--------------------------------------------------------------|
 | `net_length`        |      4 | Per-net Manhattan distance, hub-based; bounded pair count    |
-| `cluster_spread`    |      3 | Manhattan distance from each cluster member to its anchor    |
+| `cluster_spread`    |      3 | Centroid-to-centroid distance from each cluster member to anchor |
+| `pin_proximity`     |      8 | Pin-to-pin Manhattan distance between the closest pair per net |
 | `decoupler`         |     24 | 8× cluster for bypass caps joined by power/ground to a DIP   |
-| `compactness`       |      1 | Centroid distance from locked anchor (or board centre)        |
+| `compactness`       |      1 | Centroid distance from locked anchor (or board centre)       |
+| `bbox_span`         |     12 | Origin-neutral `(x_span + y_span)` over the placed region    |
+| `bbox_area`         |      1 | Looser area tie-breaker; (x_span+1) × (y_span+1)             |
+| `anti_line`         |     60 | Soft penalty when `min(x_span, y_span)` collapses below threshold |
+| `row_wall`          |     30 | Quadratic penalty when many components share a single row   |
+| `dip_escape`        |      4 | Each non-DIP cell inside the 1-hole corridor around a DIP pin |
 | `edge`              |     10 | Connector/header on an edge pose; +5 if mating side outwards |
 | `orientation`       |      1 | DIP notch convention (orientation == 0)                       |
 | `congestion`        |      2 | 3×3 hole-bin overlap (bin "hot" once ≥ 3 components touch it)|
 | `mechanical`        |      1 | `pose.mech_cost` (span deviation + vertical penalty)         |
+
+The CP-SAT model carries the `net_length`, `cluster_spread`, pin-level
+cluster proximity (centroid + nearest pin), `compactness`, `edge`,
+`orientation`, `congestion`, and `mechanical` terms. The
+`bbox_span`, `bbox_area`, `anti_line`, `row_wall`, and `dip_escape`
+terms are *post-solve deterministic* costs — modelling `min(x_span, y_span)`
+or row distribution cleanly requires cross-candidate pair products that
+explode the model. They participate in the candidate ranker so that
+between two candidates that both route successfully, the one with the
+better physical layout wins.
 
 Net length is hub-based: a deterministic hub pin (lexicographic first
 pin) plus one Boolean-linearized term per `(hub pose, other pose)` pair.
@@ -88,6 +104,44 @@ The breakdown is computed twice — once during `Minimize(...)` and again
 deterministically from the chosen assignment — so the diagnostic matches
 the actual cost the solver minimized. Both end up in the solver trace
 under `cpsat_term_*` keys.
+
+### Candidate ranking
+
+The route-first selection ranks every routed candidate with the
+lexicographic key:
+
+1. `validation_error_count` (lower wins; must be 0 for "fully routed")
+2. `single_pin_net_count` (lower wins; `NET_SINGLE_PIN` warnings gate success)
+3. `unrouted_net_count` (lower wins)
+4. `min_span` — penalty asc; a tiny `min(x_span, y_span)` is a line collapse
+5. `max_components_per_row` — penalty asc; many components in one row = row wall
+6. `dip_escape_violations` — penalty asc; a component blocking DIP pin escape
+7. `via_count`
+8. `trace_length_units`
+9. `segment_count`
+10. `routing_cost_units`
+11. `placement_proxy_score` (final tie-breaker)
+12. `candidate_index` (deterministic final tie-breaker)
+
+`min_span`, `max_components_per_row`, and `dip_escape_violations` are the
+"hand-built perfboard" terms that prevent the regression where the solver
+collapsed eight components onto row 1 of a 15×20 board.
+
+### Solve status
+
+The solver reports a final solve status in the trace metadata under
+`cpsat_solve_status` (numeric) which decodes to one of:
+
+| Code | Status                                | Meaning |
+|-----:|---------------------------------------|---------|
+| 0    | `invalid-netlist`                     | At least one `NET_SINGLE_PIN` net, or a hard validation error |
+| 1    | `placement-feasible-routing-incomplete` | All components placed, some required nets did not route |
+| 2    | `fully-routed-valid`                  | All nets routed, zero validation errors, zero single-pin warnings |
+
+The previous pipeline could not distinguish these states; the corrected
+pipeline emits `cpsat_solve_status` so callers (UI, benchmark harness,
+export job) can detect an invalid-netlist result and avoid presenting it
+as a finished board.
 
 ---
 

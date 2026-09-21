@@ -6,11 +6,15 @@
   import TraceLayer from './TraceLayer.svelte';
   import ViaLayer from './ViaLayer.svelte';
   import { boardToSvg, type Point2D } from '../geometry';
-  import type { AnyBoardModel, AnyLayout, PerfboardModel, TraceLayout } from '../types';
+  import type { AnyBoardModel, AnyLayout, Component, PerfboardModel, TraceLayout } from '../types';
 
   type Props = {
     board: AnyBoardModel;
     layout?: AnyLayout | undefined;
+    /** Per-ref component data so the renderer can pick the right physical
+     *  shape and display the user's value text. Optional — falls back to a
+     *  generic rendering when absent (e.g. for offline previews). */
+    componentLookup?: Map<string, Component> | undefined;
     showLabels?: boolean;
     onPlacementMove?: ((componentRef: string, newAnchorHoleId: string) => void) | undefined;
     onRotate?: ((componentRef: string) => void) | undefined;
@@ -28,6 +32,7 @@
   let {
     board,
     layout = undefined,
+    componentLookup = undefined,
     showLabels = true,
     onPlacementMove = undefined,
     onRotate = undefined,
@@ -493,6 +498,7 @@
       placements={layout.placements}
       {SCALE}
       {toSvgPx}
+      {componentLookup}
       selectedId={selectedKind === 'component' ? selectedId : null}
       {onSelect}
       {onPlacementMove}
