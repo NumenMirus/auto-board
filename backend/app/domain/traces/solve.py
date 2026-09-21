@@ -115,19 +115,41 @@ def solve(
     breadboard placer); every unlocked component is (re)placed from scratch
     onto the board's plain grid before routing. This is the perfboard
     counterpart of `app.domain.solve.solve` — the `trace-solve` job operation.
+
+    Placer is selected by ``options.placement_engine``:
+
+    * ``"greedy"`` (default) — legacy single-pass placer from
+      :mod:`app.domain.traces.place`.
+    * ``"cpsat"`` — global OR-Tools CP-SAT placer from
+      :mod:`app.domain.traces.place_cpsat`. Routing-aware candidate
+      selection still happens here in the shared tail.
     """
     if progress is not None:
         progress("place", 0)
     layout = initial_layout or TraceLayout(board_id=board.id, placements=[])
 
-    placement = place_perfboard(
-        board=board,
-        footprints=footprints,
-        components=components,
-        nets=nets,
-        options=options,
-        initial_layout=layout,
-    )
+    if options.placement_engine == "cpsat":
+        from app.domain.traces.place_cpsat import solve_cpsat_placement as _cpsat_place
+
+        placement = _cpsat_place(
+            board=board,
+            footprints=footprints,
+            components=components,
+            nets=nets,
+            options=options,
+            initial_layout=layout,
+            cancel=cancel,
+            progress=lambda phase, percent: progress("place", percent) if progress else None,
+        )
+    else:
+        placement = place_perfboard(
+            board=board,
+            footprints=footprints,
+            components=components,
+            nets=nets,
+            options=options,
+            initial_layout=layout,
+        )
     placed_layout = TraceLayout(board_id=board.id, placements=placement.placements)
 
     if progress is not None:
@@ -181,19 +203,36 @@ def place_only(
     (`app.domain.place.place`). The returned layout is placed but unrouted, so the
     diagnostics from `validate_layout` will include `UNROUTED_TERMINAL` for every net —
     that mirrors the breadboard `place` op reporting `NET_OPEN` on its unrouted layout.
+
+    Placer is selected by ``options.placement_engine`` (``"greedy"`` or
+    ``"cpsat"``) — see :func:`solve` for the full description.
     """
     if progress is not None:
         progress("place", 0)
     layout = initial_layout or TraceLayout(board_id=board.id, placements=[])
 
-    placement = place_perfboard(
-        board=board,
-        footprints=footprints,
-        components=components,
-        nets=nets,
-        options=options,
-        initial_layout=layout,
-    )
+    if options.placement_engine == "cpsat":
+        from app.domain.traces.place_cpsat import solve_cpsat_placement as _cpsat_place
+
+        placement = _cpsat_place(
+            board=board,
+            footprints=footprints,
+            components=components,
+            nets=nets,
+            options=options,
+            initial_layout=layout,
+            cancel=cancel,
+            progress=lambda phase, percent: progress("place", percent) if progress else None,
+        )
+    else:
+        placement = place_perfboard(
+            board=board,
+            footprints=footprints,
+            components=components,
+            nets=nets,
+            options=options,
+            initial_layout=layout,
+        )
     placed_layout = TraceLayout(board_id=board.id, placements=placement.placements)
 
     if progress is not None:

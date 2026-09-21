@@ -100,3 +100,28 @@ def test_domain_does_not_import_infrastructure() -> None:
         rel = path.relative_to(domain_root.parent.parent)
         lines.append(f"  {rel}:{lineno}  ->  {module}")
     pytest.fail("\n".join(lines))
+
+
+def test_place_cpsat_has_no_io_imports() -> None:
+    """Explicit, narrowly-targeted purity check for the CP-SAT placer.
+
+    ``place_cpsat`` is allowed to import OR-Tools (its only non-app-domain
+    dependency) and the rest of ``app.domain``. Anything else is a leak.
+    """
+    from app.domain.traces import place_cpsat as mod
+
+    src = Path(mod.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src, filename=str(mod.__file__))
+    forbidden = {"sanic", "sqlalchemy", "redis", "boto3", "arq", "app.settings"}
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                head = (alias.name or "").split(".", 1)[0]
+                if head in forbidden:
+                    offenders.append(f"line {node.lineno}: import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            head = (node.module or "").split(".", 1)[0]
+            if head in forbidden:
+                offenders.append(f"line {node.lineno}: from {node.module} import ...")
+    assert not offenders, "place_cpsat must not import: " + "; ".join(offenders)

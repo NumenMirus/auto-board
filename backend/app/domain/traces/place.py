@@ -44,7 +44,7 @@ from app.domain.models import (
     TraceRejection,
 )
 
-__all__ = ["place"]
+__all__ = ["place", "place_greedy"]
 
 _REJECTION_CAP: int = 500
 
@@ -1108,7 +1108,7 @@ def _local_search(
 # --------------------------------------------------------------------------
 
 
-def place(
+def place_greedy(
     board: PerfboardModel,
     footprints: dict[str, ThroughHoleFootprint],
     components: list[Component],
@@ -1120,6 +1120,10 @@ def place(
 
     Same greedy + local-search + restart structure as `app.domain.place.place`;
     returns the attempt with the fewest unplaced components, then lowest cost.
+
+    Retained as ``SolverOptions.placement_engine == "greedy"``. Renamed from
+    the original ``place`` so the CP-SAT engine can live under a distinct
+    public name without losing the historic import path.
     """
     start = time.perf_counter()
     index = _PerfIndex.build(board)
@@ -1192,3 +1196,9 @@ def place(
         trace=trace,
         cost=total_cost,
     )
+
+
+# Historic import path — ``from app.domain.traces.place import place`` keeps
+# working for any existing caller (notably ``app.domain.traces.solve`` and the
+# regression suite ``tests/domain/test_traces_place.py``).
+place = place_greedy

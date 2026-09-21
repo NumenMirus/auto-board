@@ -14,7 +14,8 @@ COMPOSE := docker compose -f $(ROOT_DIR)/infra/docker-compose.yml
 .DEFAULT_GOAL := help
 
 .PHONY: help dev dev-down test lint typecheck fmt migrate seed logs smoke \
-        helm-lint k8s-kind-up k8s-deploy k8s-smoke update-golden build-images
+        helm-lint k8s-kind-up k8s-deploy k8s-smoke update-golden build-images \
+        benchmark
 
 help: ## Show this help.
 	@printf 'AutoBoard — common targets:\n'
@@ -124,3 +125,17 @@ update-golden: ## Regenerate golden files (manual — see backend/tests/golden/R
 	@echo "Regenerate golden files by re-running the golden test generation script;"
 	@echo "see backend/tests/golden/README.md for the manual regen process."
 	@echo "(There is no pytest snapshot plugin in pyproject.toml — this is intentional.)"
+
+# --- perfboard placer benchmark --------------------------------------------
+
+# Compare greedy vs CP-SAT perfboard placement on the harness fixtures.
+# Outputs a CSV at backend/scripts/benchmark-results.csv. Exit 0 always —
+# this is observability, not a test.
+
+benchmark: ## Side-by-side greedy vs CP-SAT perfboard placer benchmark.
+	cd $(ROOT_DIR)/backend && uv run python -m scripts.benchmark_placement \
+	    --fixtures dip14-flagship,header-breakout \
+	    --seeds 1,7 \
+	    --presets fast,balanced,quality \
+	    --engines greedy,cpsat \
+	    --out scripts/benchmark-results.csv
