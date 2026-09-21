@@ -878,10 +878,10 @@ class _CandidateOutcome:
 class RoutedCandidateRank:
     validation_error_count: int
     unrouted_net_count: int
-    trace_length_units: int
+    trace_length_units: float
     via_count: int
     segment_count: int
-    routing_cost_units: int
+    routing_cost_units: float
     placement_proxy_score: int
     candidate_index: int
 
@@ -956,10 +956,10 @@ def _rank_outcomes(outcomes: list[_CandidateOutcome]) -> _CandidateOutcome:
         return RoutedCandidateRank(
             validation_error_count=validation_error_count(outcome),
             unrouted_net_count=len(outcome.unrouted_nets),
-            trace_length_units=int(round(outcome.trace_length_mm * 100.0)),
+            trace_length_units=outcome.trace_length_mm,
             via_count=outcome.via_count,
             segment_count=outcome.segment_count,
-            routing_cost_units=int(round(outcome.trace_cost * 100.0)),
+            routing_cost_units=outcome.trace_cost,
             placement_proxy_score=outcome.proxy_breakdown.total,
             candidate_index=outcome.candidate_index,
         )
