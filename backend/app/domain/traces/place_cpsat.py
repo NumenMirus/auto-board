@@ -76,6 +76,12 @@ _MILLIMETRE_SCALE: int = 100  # 1 mm == 100 integer units (objective is in 1/100
 _BIN_ROWS: int = 3
 _BIN_COLS: int = 3
 _HOT_BIN_THRESHOLD: int = 3  # bin becomes "hot" once >= N components touch it
+# Top-K candidates per (hub, other) net-term pair. Without this cap the
+# model blows up as ``O(nets * len(hub) * len(other))`` — with 200
+# candidates per component on a 6-component fixture, that was 1.6 M
+# Boolean products. The cap keeps it bounded and the proximity-sort keeps
+# the model's optimal-direction intact.
+_NET_PAIR_K: int = 40
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,9 +117,9 @@ class PresetBudget:
 
 
 _PRESET_BUDGET: Mapping[str, PresetBudget] = {
-    "fast": PresetBudget(1500, 50, 3),
-    "balanced": PresetBudget(3000, 100, 5),
-    "quality": PresetBudget(10000, 150, 8),
+    "fast": PresetBudget(1500, 80, 3),
+    "balanced": PresetBudget(3000, 200, 5),
+    "quality": PresetBudget(10000, 350, 8),
 }
 
 
@@ -696,11 +702,27 @@ def add_objective_terms(
         hub_cands = candidates.get(hub_ref)
         if hub_cands:
             for other in sorted_pins[1:]:
+                other_cands = candidates.get(other.component_ref, ())  # type: ignore[arg-type]
+                if not other_cands:
+                    continue
+                # Cap per-(hub, other) candidate-pair budget so the model
+                # does not blow up. Sort both sides by centroid proximity
+                # to the other's pin centroid so the kept pairs are the
+                # ones that actually compete for the lowest net cost.
+                _k = min(_NET_PAIR_K, len(hub_cands), len(other_cands))
+                hub_top = sorted(
+                    hub_cands,
+                    key=lambda c_h: _manhattan_q(c_h.pin_centroid_q, other_cands[0].pin_centroid_q),
+                )[:_k]
+                other_top = sorted(
+                    other_cands,
+                    key=lambda c_o: _manhattan_q(c_o.pin_centroid_q, hub_cands[0].pin_centroid_q),
+                )[:_k]
                 if len(net.pins) > 6:
                     # Hub-only approximation: each pin contributes distance
                     # to the hub (no inter-pin product).
-                    for c_hub in hub_cands:
-                        for c_other in candidates.get(other.component_ref, ()):  # type: ignore[arg-type]
+                    for c_hub in hub_top:
+                        for c_other in other_top:
                             z = model.NewBoolVar(
                                 f"net_hub_{net.id}_{c_hub.pose_id}_{other.component_ref}_{c_other.pose_id}"
                             )
@@ -716,8 +738,8 @@ def add_objective_terms(
                             terms.append(weights.net * d * z)
                     continue
                 # Bounded pairwise: each other pin → hub.
-                for c_hub in hub_cands:
-                    for c_other in candidates.get(other.component_ref, ()):  # type: ignore[arg-type]
+                for c_hub in hub_top:
+                    for c_other in other_top:
                         z = model.NewBoolVar(
                             f"net_pair_{net.id}_{c_hub.pose_id}_{other.component_ref}_{c_other.pose_id}"
                         )
@@ -732,15 +754,33 @@ def add_objective_terms(
                         d = _manhattan_q(c_hub.pin_centroid_q, c_other.pin_centroid_q)
                         terms.append(weights.net * d * z)
 
-    # ---- 2. Cluster proximity ----
+    # ---- 2. Cluster proximity (with per-pair K cap) ----
+    # The naive cluster loop produces ``len(anchor_cands) * len(member_cands)``
+    # Boolean linearizations per cluster member — at cap=200 that's 40 k
+    # products per member, blowing up the model. Restrict to the top
+    # ``_NET_PAIR_K`` candidate pairs by centroid distance so each
+    # member contributes at most ``K²`` products. Pairs outside the K are
+    # not modelled, but the proximity heuristic is dominated by the
+    # closest candidates anyway.
     for member_ref, anchor_ref in cluster_anchor_of.items():
         if member_ref == anchor_ref:
             continue
         if member_ref not in candidates or anchor_ref not in candidates:
             continue
         w = weights.decoupler if is_decoupler.get(member_ref, False) else weights.cluster
-        for ca in candidates[anchor_ref]:
-            for cm in candidates[member_ref]:
+        anchor_cands = candidates[anchor_ref]
+        member_cands = candidates[member_ref]
+        _k = min(_NET_PAIR_K, len(anchor_cands), len(member_cands))
+        anchor_top = sorted(
+            anchor_cands,
+            key=lambda c_a: _manhattan_q(c_a.centroid_q, member_cands[0].centroid_q),
+        )[:_k]
+        member_top = sorted(
+            member_cands,
+            key=lambda c_m: _manhattan_q(c_m.centroid_q, anchor_cands[0].centroid_q),
+        )[:_k]
+        for ca in anchor_top:
+            for cm in member_top:
                 z = model.NewBoolVar(
                     f"cl_{anchor_ref}_{ca.pose_id}_{member_ref}_{cm.pose_id}"
                 )
@@ -810,6 +850,17 @@ def add_objective_terms(
     for ref, cands in candidates.items():
         for c in cands:
             terms.append(weights.mechanical * c.mech_cost_q * sel_vars[ref][c.pose_id])
+
+    # ---- 8. (Spread term retired) ----
+    # Original idea was a pairwise Boolean-linearized penalty when two
+    # movable components picked poses within the same row/col window, so
+    # a fully legal but row-collapsed layout would be penalised. In
+    # practice the model became UNKNOWN at the default cap on flagship
+    # fixtures, and the row-collapse the user reported is fixed by
+    # raising the default ``placement_candidate_limit`` from 100 to 200
+    # — that brings in geometric-diverse candidates naturally and the
+    # existing terms already spread the layout. Re-enable behind a
+    # settings flag if a future fixture needs it.
 
     return terms, breakdown
 
@@ -1333,7 +1384,17 @@ def solve_cpsat_placement(
     # Loop: solve, extract, no-good, solve again, up to solution_count.
     routing_budget_ms = max(200, int(0.4 * time_limit_ms))
     solving_budget_ms = time_limit_ms - routing_budget_ms
-    per_solve_ms = max(50, solving_budget_ms // max(1, solution_count))
+    # Give the first solve 60 % of the solving budget (it's the one most
+    # likely to find OPTIMAL; subsequent no-good solves share the rest).
+    if solution_count > 1:
+        first_solve_ms = max(100, int(0.6 * solving_budget_ms))
+        per_solve_ms = max(
+            50,
+            (solving_budget_ms - first_solve_ms) // max(1, solution_count - 1),
+        )
+    else:
+        first_solve_ms = max(50, solving_budget_ms)
+        per_solve_ms = 0
 
     collected: list[tuple[list[ComponentPlacement], PlacementObjectiveBreakdown]] = []
     previous_assignment: dict[str, int] = {}
@@ -1342,7 +1403,10 @@ def solve_cpsat_placement(
     for k in range(solution_count):
         if cancel is not None and cancel():
             raise SolverCancelled("cpsat placement cancelled during search")
-        solver.parameters.max_time_in_seconds = max(0.1, per_solve_ms / 1000.0)
+        # First solve gets the larger budget; subsequent ones share the
+        # remainder via per_solve_ms.
+        this_solve_ms = first_solve_ms if k == 0 else per_solve_ms
+        solver.parameters.max_time_in_seconds = max(0.1, this_solve_ms / 1000.0)
         status = solver.Solve(model)
         last_status = status
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1384,6 +1448,84 @@ def solve_cpsat_placement(
     if progress is not None:
         progress("trace-route", 85)
 
+    # Retry once with doubled candidate cap if the model was infeasible
+    # OR all solves were UNKNOWN (timed out without finding). Common
+    # cause: cheap-score filtering left too few non-overlapping candidate
+    # pairs for the model to find a placement. Doubling the cap brings in
+    # geometric-diverse candidates that restore feasibility without
+    # changing the objective.
+    if (
+        not collected
+        and last_status in (cp_model.INFEASIBLE, cp_model.UNKNOWN)
+        and candidate_limit < 500
+    ):
+        retry_limit = min(500, candidate_limit * 2)
+        if progress is not None:
+            progress("place", 22)
+        candidates, hole_to_candidates, _ = build_candidate_poses(
+            board=board,
+            footprints=footprints,
+            components=[c for c in components if c.ref not in locked_refs],
+            locked_placements=locked_placements,
+            candidate_limit=retry_limit,
+            initial_layout=initial_layout,
+        )
+        model, sel_vars = build_cpsat_model(
+            candidates=candidates,
+            hole_to_candidates=hole_to_candidates,
+            locked_occupied={hid for p in locked_placements for hid in p.occupied_hole_ids},
+        )
+        terms, _ = add_objective_terms(
+            model,
+            sel_vars=sel_vars,
+            candidates=candidates,
+            components=[c for c in components if c.ref not in locked_refs],
+            nets=nets,
+            board=board,
+            locked_placements=locked_placements,
+        )
+        if terms:
+            model.Minimize(sum(terms))
+        for k in range(solution_count):
+            if cancel is not None and cancel():
+                raise SolverCancelled("cpsat placement cancelled during retry")
+            this_solve_ms = first_solve_ms if k == 0 else per_solve_ms
+            solver.parameters.max_time_in_seconds = max(0.1, this_solve_ms / 1000.0)
+            status = solver.Solve(model)
+            last_status = status
+            if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                unplaced: list[str] = []
+                extracted = _selected_pose_for(
+                    model, solver, sel_vars, candidates,
+                    [c for c in components if c.ref not in locked_refs],
+                    nets, board, locked_placements,
+                    DEFAULT_CPSAT_WEIGHTS, unplaced, footprints,
+                )
+                if extracted is not None:
+                    placements, breakdown = extracted
+                    collected.append((placements, breakdown))
+                    previous_assignment = {}
+                    for p in placements:
+                        if p.component_ref not in candidates:
+                            continue
+                        for c in candidates[p.component_ref]:
+                            if (
+                                c.anchor_idx >= 0
+                                and index_hole_id(c) == p.anchor_hole_id
+                                and c.span == p.span
+                                and c.orientation == p.orientation
+                            ):
+                                previous_assignment[p.component_ref] = c.pose_id
+                                break
+            elif status == cp_model.INFEASIBLE:
+                break
+            if progress is not None:
+                progress("place", 25 + int(60 * (k + 1) / solution_count))
+            if k < solution_count - 1:
+                _add_no_good_constraint(
+                    model, sel_vars=sel_vars, previous_assignment=previous_assignment
+                )
+
     # Routing-aware selection.
     outcomes: list[_CandidateOutcome] = []
     for placements, breakdown in collected:
@@ -1408,36 +1550,92 @@ def solve_cpsat_placement(
         progress("trace-route", 95)
 
     if not outcomes:
-        # Solver produced no usable candidate — return empty placements +
-        # all movable as unplaced so the pipeline can still complete.
-        trace = SolverTrace(
-            seed=options.solver_seed,
-            placement_order=[],
-            pose_choices=[],
-            rejections=[
-                TraceRejection(
-                    component_ref=ref,
-                    reason="no_cpsat_solution",
-                    detail=f"cp_model status: {solver.StatusName(last_status)}",
-                )
-                for ref in movable_refs
-            ],
-            failed_nets=[],
-            ripups=[],
-            iteration_scores=[],
-            phase_timings_ms={
-                "place": round((time.perf_counter() - t_start) * 1000.0, 3),
-                "cpsat_preset_used": 1 if preset_used else 0,
-            },
+        # Solver produced no usable candidate — fall back to the greedy
+        # placer so the user always gets a routable layout. CP-SAT stays
+        # available via the explicit ``placement_engine="cpsat"`` option
+        # but defaults to a graceful fallback rather than empty placements.
+        greedy_result = place_greedy(
+            board=board,
+            footprints=footprints,
+            components=components,
+            nets=nets,
+            options=options,
+            initial_layout=initial_layout,
         )
+        if greedy_result.unplaced:
+            # Greedy also failed: return empty placements + all movable
+            # as unplaced so the pipeline can still complete with
+            # diagnostics.
+            trace = SolverTrace(
+                seed=options.solver_seed,
+                placement_order=[],
+                pose_choices=[],
+                rejections=[
+                    TraceRejection(
+                        component_ref=ref,
+                        reason="no_cpsat_or_greedy_solution",
+                        detail=f"cp_model status: {solver.StatusName(last_status)}",
+                    )
+                    for ref in greedy_result.unplaced
+                ],
+                failed_nets=[],
+                ripups=[],
+                iteration_scores=[],
+                phase_timings_ms={
+                    "place": round((time.perf_counter() - t_start) * 1000.0, 3),
+                    "cpsat_preset_used": 1 if preset_used else 0,
+                    "cpsat_fallback_greedy": 1,
+                },
+            )
+            if progress is not None:
+                progress("done", 100)
+            return PlacementResult(
+                placements=list(locked_placements),
+                unplaced=greedy_result.unplaced,
+                trace=trace,
+                cost=0.0,
+            )
+        # Greedy produced placements: return them and tag the trace so the
+        # caller can see the fallback path.
+        greedy_trace = greedy_result.trace
+        if greedy_trace.phase_timings_ms is None:
+            greedy_trace.phase_timings_ms = {}
+        greedy_trace.phase_timings_ms["cpsat_fallback_greedy"] = 1
+        greedy_trace.phase_timings_ms["cpsat_preset_used"] = 1 if preset_used else 0
         if progress is not None:
             progress("done", 100)
-        return PlacementResult(
-            placements=list(locked_placements),
-            unplaced=movable_refs,
-            trace=trace,
-            cost=0.0,
+        return greedy_result
+
+    # Always also route greedy so the routing-aware ranking has a known-good
+    # baseline. If greedy routes better than any CP-SAT candidate, the
+    # ranking picks greedy automatically — that prevents the regression
+    # where a CP-SAT candidate with broken routing was returned even
+    # though greedy produced a fully-routable layout.
+    greedy_placement = place_greedy(
+        board=board,
+        footprints=footprints,
+        components=components,
+        nets=nets,
+        options=options,
+        initial_layout=initial_layout,
+    )
+    if not greedy_placement.unplaced:
+        greedy_breakdown = PlacementObjectiveBreakdown(
+            total=int(round(greedy_placement.cost * _MILLIMETRE_SCALE))
         )
+        greedy_outcome = _evaluate_candidate(
+            board=board,
+            footprints=footprints,
+            components=components,
+            nets=nets,
+            candidate=greedy_placement.placements,
+            cancel=cancel,
+            progress=progress,
+            proxy_breakdown=greedy_breakdown,
+            placement_engine_ms=round((time.perf_counter() - t_start) * 1000.0, 3),
+        )
+        if greedy_outcome is not None:
+            outcomes.append(greedy_outcome)
 
     best = _rank_outcomes(outcomes)
     final_placements = best.placements

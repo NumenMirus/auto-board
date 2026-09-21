@@ -413,9 +413,9 @@ class SolverOptions(WireModel):
     timeout_seconds: int | None = None
     preset: Literal["fast", "balanced", "quality"] = "balanced"
     # --- CP-SAT autoplacer (additive; defaults preserve greedy behaviour) ---
-    placement_engine: Literal["greedy", "cpsat"] = "greedy"
+    placement_engine: Literal["greedy", "cpsat"] = "cpsat"
     placement_time_limit_ms: int = Field(default=3000, ge=100, le=120000)
-    placement_candidate_limit: int = Field(default=100, ge=10, le=500)
+    placement_candidate_limit: int = Field(default=200, ge=10, le=500)
     placement_solution_count: int = Field(default=5, ge=1, le=20)
     solver_seed: int = 7
 

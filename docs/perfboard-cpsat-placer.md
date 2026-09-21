@@ -20,15 +20,20 @@ behind a flag and is opt-in via `SolverOptions.placement_engine == "cpsat"`.
 from app.domain.models import SolverOptions
 
 opts = SolverOptions(
-    placement_engine="cpsat",
+    # placement_engine="cpsat" is the default. Pass "greedy" explicitly
+    # to opt out (legacy single-pass placer).
     preset="balanced",
     solver_seed=7,
 )
 ```
 
-- The default `placement_engine` is `"greedy"` — existing project documents
-  keep loading and the legacy placer keeps running until benchmarks prove
-  the flip.
+- The default `placement_engine` is `"cpsat"`. Set it to `"greedy"` to
+  use the legacy single-pass placer from `app.domain.traces.place`.
+- The dispatcher in `app.domain.traces.solve.solve(...)` and `place_only(...)`
+  routes between the two engines. CP-SAT falls back to greedy when it
+  cannot find a feasible placement in the budget, so the user is never
+  given a worse result than greedy alone — see
+  [Fallback behaviour](#fallback-behaviour) below.
 - Existing `placement_weights` and `routing_weights` are ignored by the
   CP-SAT path; the new objective is described below.
 - The CP-SAT engine is orthogonal to `SolverOptions.preset`. The preset
@@ -165,17 +170,25 @@ unrouted status. The worker never crashes on infeasibility.
 
 ## Fallback behaviour
 
-`placement_engine="greedy"` is preserved for one release minimum. The
-legacy placer is `app.domain.traces.place.place_greedy` (also reachable
-as the historic name `place`). The dispatcher in
-`app.domain.traces.solve.solve(...)` and `place_only(...)` switches by
-`options.placement_engine` value.
+CP-SAT is the default but it must never produce a worse result than
+greedy. Two layers of fallback keep the user from seeing a regression:
 
-If the CP-SAT path produces no usable candidate, the pipeline falls back
-to the greedy placer's same-named entry point with the same options (so
-the trace/route/validate tail sees a uniform `PlacementResult` shape).
-The fallback is recorded as a `TraceRejection(reason="no_cpsat_solution")`
-in the trace.
+1. **Routing-aware selection.** Every CP-SAT candidate is routed with the
+   existing maze router, and greedy is *also* routed. The best-routed
+   candidate wins, so if a CP-SAT candidate has more unrouted nets than
+   greedy's output, the ranking picks greedy automatically. This is the
+   primary safety net and triggers for any CP-SAT placement that the
+   router can't complete.
+2. **No-candidate fallback.** If CP-SAT returns zero usable candidates
+   (e.g. model UNKNOWN/INFEASIBLE within the wall-time budget), the
+   pipeline calls `place_greedy(...)` with the same options and returns
+   that result if it places anything. The fallback is recorded in
+   `SolverTrace.phase_timings_ms["cpsat_fallback_greedy"] = 1`.
+
+`placement_engine="greedy"` is preserved indefinitely. The legacy placer
+is `app.domain.traces.place.place_greedy` (also reachable as the historic
+name `place`). The dispatcher in `app.domain.traces.solve.solve(...)`
+and `place_only(...)` switches by `options.placement_engine` value.
 
 ---
 
