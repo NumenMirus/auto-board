@@ -25,11 +25,11 @@
     highlightHoleId = null
   }: Props = $props();
 
-  // Hole drawing. Slightly larger than the physical 0.75 mm so the grid
-  // reads at typical zoom. The inner "shadow" gives the impression of a
-  // real recess rather than a flat dot.
-  const HOLE_RADIUS_MM = 0.85;
-  const HOLE_INNER_MM = 0.55;
+  // Hole drawing. The outer ring defines the pad, the inner dot gives a hint
+  // of recess without dominating. Both are kept low-contrast so the grid
+  // recedes behind the components and traces.
+  const HOLE_RADIUS_MM = 0.6;
+  const HOLE_INNER_MM = 0.32;
 </script>
 
 <g class="holes">
@@ -46,16 +46,16 @@
           cx={svgPt.x}
           cy={svgPt.y}
           r={r}
-          fill="#F2EFE7"
-          stroke={isHighlight ? 'var(--accent-1)' : '#A8A294'}
-          stroke-width={isHighlight ? 0.5 * SCALE : 0.25 * SCALE}
+          fill="var(--paper-0)"
+          stroke={isHighlight ? 'var(--accent-1)' : '#D8D3C5'}
+          stroke-width={isHighlight ? 0.5 * SCALE : 0.18 * SCALE}
           data-hole-id={hole.id}
         />
         <circle
           cx={svgPt.x}
           cy={svgPt.y}
           r={ir}
-          fill="#1A1816"
+          fill="#B5AE9F"
           pointer-events="none"
         />
       </g>
@@ -89,12 +89,12 @@
         {@const svgPt = toSvgPx({ x: h.point.x, y: h.point.y })}
         <text
           x={svgPt.x}
-          y={svgPt.y - 3.4 * SCALE}
+          y={svgPt.y - 3.0 * SCALE}
           text-anchor="middle"
           font-family="'JetBrains Mono', monospace"
-          font-size="2.6"
-          font-weight="500"
-          fill="#8C8676"
+          font-size="2.0"
+          font-weight="400"
+          fill="#A8A294"
         >
           {col}
         </text>
@@ -105,13 +105,13 @@
       {#if h}
         {@const svgPt = toSvgPx({ x: h.point.x, y: h.point.y })}
         <text
-          x={svgPt.x - 3.2 * SCALE}
-          y={svgPt.y + 1.2 * SCALE}
+          x={svgPt.x - 2.8 * SCALE}
+          y={svgPt.y + 1.0 * SCALE}
           text-anchor="end"
           font-family="'JetBrains Mono', monospace"
-          font-size="2.6"
-          font-weight="500"
-          fill="#8C8676"
+          font-size="2.0"
+          font-weight="400"
+          fill="#A8A294"
         >
           {row}
         </text>

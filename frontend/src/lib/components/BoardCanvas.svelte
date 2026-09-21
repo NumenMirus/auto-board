@@ -46,7 +46,7 @@
     pendingStart = jumperStartHoleId;
   });
 
-  const SCALE = 4;
+  const SCALE = 3;
 
   const boardExtent = $derived.by(() => {
     const DEFAULT = { minX: 0, minY: -15, maxX: 80, maxY: 45 };

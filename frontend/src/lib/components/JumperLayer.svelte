@@ -14,9 +14,9 @@
   // Lower-layer wires draw as solid; upper-layer wires (those crossing at
   // least one other jumper) draw as a slightly fatter line with a faint
   // outer halo so crossings read at a glance.
-  const STROKE_LOWER = 0.55;
-  const STROKE_UPPER = 0.7;
-  const HALO_UPPER = 1.6;
+  const STROKE_LOWER = 0.42;
+  const STROKE_UPPER = 0.55;
+  const HALO_UPPER = 1.4;
 
   function polylinePoints(j: Jumper): string {
     return j.path.points
@@ -114,20 +114,20 @@
         <circle
           cx={mid.x + off.x}
           cy={mid.y + off.y}
-          r={1.6 * SCALE}
-          fill="#FFFFFF"
-          stroke="#3A332B"
-          stroke-width={0.4 * SCALE}
+          r={1.2 * SCALE}
+          fill="var(--paper-0)"
+          stroke="#5C564B"
+          stroke-width={0.25 * SCALE}
         />
         <text
           x={mid.x + off.x}
-          y={mid.y + off.y + 0.9 * SCALE}
+          y={mid.y + off.y + 0.7 * SCALE}
           text-anchor="middle"
           dominant-baseline="middle"
           font-family="'JetBrains Mono', monospace"
-          font-size="2.2"
+          font-size="1.8"
           font-weight="600"
-          fill="#181715"
+          fill="#3A332B"
         >
           {index + 1}
         </text>

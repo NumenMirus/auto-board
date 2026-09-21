@@ -55,7 +55,7 @@ describe('TraceLayer', () => {
     });
     const polylines = container.querySelectorAll('polyline');
     expect(polylines[0]?.getAttribute('stroke-dasharray')).toBeNull();
-    expect(polylines[1]?.getAttribute('stroke-dasharray')).toBe('2.8 1.6');
+    expect(polylines[1]?.getAttribute('stroke-dasharray')).toBe('2.4 1.6');
   });
 
   it('assigns a stable colour to the same net id across renders', () => {

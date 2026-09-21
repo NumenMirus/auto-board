@@ -164,27 +164,27 @@
             y={tl.y}
             width={(maxX - minX + 2.54) * SCALE}
             height={(maxY - minY + 2.54) * SCALE}
-            rx="1.2"
-            ry="1.2"
-            fill={isDragging ? '#1a1816' : '#2A2622'}
+            rx="1.0"
+            ry="1.0"
+            fill={isDragging ? '#8A8273' : '#5C564B'}
             fill-opacity={isDragging ? 0.45 : 1}
-            stroke={isSelected ? 'var(--accent-1)' : '#100F0D'}
-            stroke-width={isSelected ? 0.6 * SCALE : 0.3 * SCALE}
+            stroke={isSelected ? 'var(--accent-1)' : '#3F3A32'}
+            stroke-width={isSelected ? 0.6 * SCALE : 0.2 * SCALE}
           />
           <path
             d={dipNotch(tl.x, tl.y, br.x, br.y)}
             fill="none"
-            stroke="rgba(255,255,255,0.6)"
-            stroke-width={0.35 * SCALE}
+            stroke="rgba(245,242,235,0.7)"
+            stroke-width={0.25 * SCALE}
           />
           <text
             x={tl.x + ((maxX - minX + 2.54) * SCALE) / 2}
-            y={tl.y + ((maxY - minY + 2.54) * SCALE) / 2 - 0.4 * SCALE}
+            y={tl.y + ((maxY - minY + 2.54) * SCALE) / 2 - 0.2 * SCALE}
             text-anchor="middle"
             dominant-baseline="middle"
             font-family="'JetBrains Mono', monospace"
-            font-size={Math.min(widthMm, heightMm) * SCALE * 0.28}
-            font-weight="600"
+            font-size={Math.min(widthMm, heightMm) * SCALE * 0.22}
+            font-weight="500"
             fill="#F5F2EB"
           >
             {placement.componentRef}
@@ -203,14 +203,14 @@
           <g transform={`translate(${midX} ${midY}) rotate(${angleDeg})`}>
             <rect
               x={-lengthPx / 2 + 1.2 * SCALE}
-              y={-1.0 * SCALE}
+              y={-0.85 * SCALE}
               width={lengthPx - 2.4 * SCALE}
-              height={2.0 * SCALE}
-              rx="1.0"
-              ry="1.0"
-              fill={placement.locked ? '#D8D2C2' : '#D7C8A0'}
+              height={1.7 * SCALE}
+              rx="0.85"
+              ry="0.85"
+              fill={placement.locked ? '#D8D2C2' : '#C9BC95'}
               stroke={isSelected ? 'var(--accent-1)' : '#7E6A3C'}
-              stroke-width={isSelected ? 0.5 * SCALE : 0.25 * SCALE}
+              stroke-width={isSelected ? 0.5 * SCALE : 0.18 * SCALE}
               opacity={isDragging ? 0.45 : 1}
             />
             <line
@@ -218,25 +218,25 @@
               x2={-lengthPx / 2 + 1.2 * SCALE}
               y1="0"
               y2="0"
-              stroke="#A8A294"
-              stroke-width="0.4"
+              stroke="#B5AE9F"
+              stroke-width="0.3"
             />
             <line
               x1={lengthPx / 2 - 1.2 * SCALE}
               x2={lengthPx / 2}
               y1="0"
               y2="0"
-              stroke="#A8A294"
-              stroke-width="0.4"
+              stroke="#B5AE9F"
+              stroke-width="0.3"
             />
             <text
               x="0"
-              y={-0.4 * SCALE}
+              y={-0.3 * SCALE}
               text-anchor="middle"
               dominant-baseline="middle"
               font-family="'JetBrains Mono', monospace"
-              font-size={Math.max(2.6, lengthPx * 0.18)}
-              font-weight="600"
+              font-size={Math.max(2.0, lengthPx * 0.14)}
+              font-weight="500"
               fill="#3A2F12"
             >
               {placement.componentRef}
@@ -252,21 +252,21 @@
           {@const midY = (axSvg.y + bxSvg.y) / 2}
           <g transform={`translate(${midX} ${midY})`}>
             <circle
-              r={2.6 * SCALE}
-              fill={placement.locked ? '#E2DBCB' : '#9FB7D6'}
-              stroke={isSelected ? 'var(--accent-1)' : '#1F4F86'}
-              stroke-width={isSelected ? 0.5 * SCALE : 0.3 * SCALE}
+              r={2.0 * SCALE}
+              fill={placement.locked ? '#E2DBCB' : '#A8B8C8'}
+              stroke={isSelected ? 'var(--accent-1)' : '#5A7186'}
+              stroke-width={isSelected ? 0.5 * SCALE : 0.2 * SCALE}
               opacity={isDragging ? 0.45 : 1}
             />
             <text
               x="0"
-              y="0.4"
+              y="0.3"
               text-anchor="middle"
               dominant-baseline="middle"
               font-family="'JetBrains Mono', monospace"
-              font-size="2.8"
-              font-weight="600"
-              fill="#0F2238"
+              font-size="2.0"
+              font-weight="500"
+              fill="#1F2D38"
             >
               {placement.componentRef}
             </text>
@@ -278,12 +278,12 @@
             y={tl.y}
             width={(maxX - minX + 2.54) * SCALE}
             height={(maxY - minY + 2.54) * SCALE}
-            rx="0.6"
-            ry="0.6"
-            fill={placement.locked ? '#D8D2C2' : '#222220'}
+            rx="0.4"
+            ry="0.4"
+            fill={placement.locked ? '#D8D2C2' : '#5C564B'}
             fill-opacity={isDragging ? 0.45 : 1}
-            stroke={isSelected ? 'var(--accent-1)' : '#000000'}
-            stroke-width={isSelected ? 0.5 * SCALE : 0.3 * SCALE}
+            stroke={isSelected ? 'var(--accent-1)' : '#3F3A32'}
+            stroke-width={isSelected ? 0.5 * SCALE : 0.2 * SCALE}
           />
           <text
             x={tl.x + ((maxX - minX + 2.54) * SCALE) / 2}
@@ -291,25 +291,25 @@
             text-anchor="middle"
             dominant-baseline="middle"
             font-family="'JetBrains Mono', monospace"
-            font-size={Math.min(widthMm, heightMm) * SCALE * 0.32}
-            font-weight="600"
+            font-size={Math.min(widthMm, heightMm) * SCALE * 0.24}
+            font-weight="500"
             fill="#F0EDE3"
           >
             {placement.componentRef}
           </text>
         {:else}
-          <!-- Header / connector: dark block. -->
+          <!-- Header / connector: muted block. -->
           <rect
             x={tl.x}
             y={tl.y}
             width={(maxX - minX + 2.54) * SCALE}
             height={(maxY - minY + 2.54) * SCALE}
-            rx="0.6"
-            ry="0.6"
-            fill={placement.locked ? '#D8D2C2' : '#3A332B'}
+            rx="0.4"
+            ry="0.4"
+            fill={placement.locked ? '#D8D2C2' : '#6E6453'}
             fill-opacity={isDragging ? 0.45 : 1}
-            stroke={isSelected ? 'var(--accent-1)' : '#1A1612'}
-            stroke-width={isSelected ? 0.5 * SCALE : 0.3 * SCALE}
+            stroke={isSelected ? 'var(--accent-1)' : '#3F3A32'}
+            stroke-width={isSelected ? 0.5 * SCALE : 0.2 * SCALE}
           />
           <text
             x={tl.x + ((maxX - minX + 2.54) * SCALE) / 2}
@@ -317,8 +317,8 @@
             text-anchor="middle"
             dominant-baseline="middle"
             font-family="'JetBrains Mono', monospace"
-            font-size={Math.min(widthMm, heightMm) * SCALE * 0.36}
-            font-weight="600"
+            font-size={Math.min(widthMm, heightMm) * SCALE * 0.26}
+            font-weight="500"
             fill="#F5F2EB"
           >
             {placement.componentRef}
@@ -328,28 +328,28 @@
         {#if placement.locked}
           <!-- Locked badge -->
           <g
-            transform={`translate(${br.x - 1.6 * SCALE} ${tl.y - 0.2 * SCALE})`}
+            transform={`translate(${br.x - 1.2 * SCALE} ${tl.y - 0.2 * SCALE})`}
             pointer-events="none"
           >
             <rect
-              x={-1.6 * SCALE}
-              y={-1.6 * SCALE}
-              width={3.2 * SCALE}
-              height={3.2 * SCALE}
-              rx="0.4"
-              ry="0.4"
-              fill="#F2EFE7"
+              x={-1.2 * SCALE}
+              y={-1.2 * SCALE}
+              width={2.4 * SCALE}
+              height={2.4 * SCALE}
+              rx="0.3"
+              ry="0.3"
+              fill="var(--paper-0)"
               stroke="#A8A294"
-              stroke-width="0.3"
+              stroke-width="0.2"
             />
             <text
               x="0"
-              y="0.2"
+              y="0.15"
               text-anchor="middle"
               dominant-baseline="middle"
               font-family="'JetBrains Mono', monospace"
-              font-size="2.6"
-              font-weight="700"
+              font-size="2.0"
+              font-weight="600"
               fill="#3A332B"
             >
               L
@@ -368,13 +368,13 @@
             y={ghostSvg.y}
             width={(maxX - minX + 2.54) * SCALE}
             height={(maxY - minY + 2.54) * SCALE}
-            rx="2"
-            ry="2"
+            rx="1.2"
+            ry="1.2"
             fill="var(--accent-1)"
-            fill-opacity="0.18"
+            fill-opacity="0.12"
             stroke="var(--accent-1)"
-            stroke-width="0.6"
-            stroke-dasharray="2 2"
+            stroke-width="0.4"
+            stroke-dasharray="1.6 1.6"
             pointer-events="none"
           />
         {/if}

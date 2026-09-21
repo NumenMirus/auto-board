@@ -19,15 +19,14 @@
     onSelect = undefined
   }: Props = $props();
 
-  // Top copper is solid and bright; bottom copper is dashed (it runs on
-  // the underside of the board — when the user sees two parallel traces,
-  // the dashed one is on the other side). Computed lazily so the runtime
-  // SCALE is read at template-time, not module-init.
+  // Top copper is solid; bottom copper is dashed (it runs on the underside
+  // of the board — when two parallel traces appear, the dashed one is on
+  // the other side).
   function strokeWidth(): number {
-    return 0.55 * SCALE;
+    return 0.42 * SCALE;
   }
   function dashBottom(): string {
-    return `${0.7 * SCALE} ${0.4 * SCALE}`;
+    return `${0.6 * SCALE} ${0.4 * SCALE}`;
   }
 
   function segmentPoints(segment: Trace['segments'][number]): string {
@@ -38,21 +37,22 @@
 
   function traceColor(trace: Trace): string {
     if (highlightNetId && trace.netId !== highlightNetId) return '#D6CFBE';
-    // Stable per-net color, palette drawn from the bench wire set + the
-    // table of common 22-AWG silicone jacket colors.
+    // Muted, harmonized palette inspired by pencil-on-paper drafts. Each
+    // hue stays distinct enough to identify a net on a busy board, but the
+    // chroma is dropped so the trace doesn't shout over the components.
     const palette = [
-      '#1F77B4',
-      '#D6332B',
-      '#2A6E3F',
-      '#7B3FA8',
-      '#C2820F',
-      '#8C564B',
-      '#0E7C8C',
-      '#4F4F4F',
-      '#A23582'
+      '#5C7AA8', // slate blue
+      '#A8645C', // brick
+      '#5C8C6F', // sage
+      '#7E6B9A', // muted plum
+      '#B08840', // ochre
+      '#8C7A6E', // taupe
+      '#5C8C8C', // teal
+      '#7A7A7A', // graphite
+      '#9A6B82'  // dusty rose
     ];
     let hash = 0;
-    for (let i = 0; i < trace.netId.length; i++) {
+    for (let i = 0; i < trace.netId.length; i += 1) {
       hash = (hash * 31 + trace.netId.charCodeAt(i)) >>> 0;
     }
     return palette[hash % palette.length];
