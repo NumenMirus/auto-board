@@ -148,6 +148,7 @@ import type {
   AnyBoardModel,
   BoardKind,
   BreadboardFootprint,
+  BreadboardModel,
   Layout,
   Net,
   ProjectDocument,
@@ -303,11 +304,10 @@ export interface BoardModelSummary {
 }
 
 export interface ValidateRequest {
-  boardModelId: string;
-  components: Component[];
-  nets: Net[];
+  board: BreadboardModel;
+  netlist: { components: Component[]; nets: Net[] };
   layout: Layout;
-  options?: { allowCriticalNetClasses?: boolean };
+  options: SolverOptions;
 }
 
 export interface ValidateResponse {
@@ -396,14 +396,22 @@ export function listFootprints(kind?: BoardKind): Promise<BreadboardFootprint[]>
 // ---- Validate (synchronous, in-process on the backend) --------------------
 
 export function validateLayout(
-  boardModelId: string,
+  board: BreadboardModel,
   components: Component[],
   nets: Net[],
   layout: Layout,
-  options?: { allowCriticalNetClasses?: boolean }
+  options: SolverOptions = {}
 ): Promise<ValidateResponse> {
-  const body: ValidateRequest = { boardModelId, components, nets, layout };
-  if (options !== undefined) body.options = options;
+  // `board` often flows in from `getBoardModel`, whose response is widened
+  // with a `kind` discriminator that the backend's `BreadboardModel` wire
+  // model doesn't accept (`extra_forbidden`). Strip it before serializing.
+  const { kind: _kind, ...boardPayload } = board as BreadboardModel & { kind?: BoardKind };
+  const body: ValidateRequest = {
+    board: boardPayload as BreadboardModel,
+    netlist: { components, nets },
+    layout,
+    options
+  };
   return apiFetch<ValidateResponse>('/validate', {
     method: 'POST',
     body: JSON.stringify(body)

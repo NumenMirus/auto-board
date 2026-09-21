@@ -20,6 +20,7 @@
     AnyBoardModel,
     BoardKind,
     BreadboardFootprint,
+    BreadboardModel,
     Diagnostic,
     Layout,
     LayoutScore,
@@ -101,7 +102,7 @@
     lastValidateError = null;
     try {
       const result = await validateLayout(
-        doc.board.modelId,
+        board as BreadboardModel,
         doc.components,
         doc.nets,
         doc.layout,

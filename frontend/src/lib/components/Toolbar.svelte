@@ -30,7 +30,8 @@
       class="tool-btn"
       disabled={disabled}
       onclick={() => onAutoPlace?.()}
-      title="Place only — no jumpers"
+      title="Auto-place components on the board — no jumpers will be added"
+      aria-label="Place: auto-place components without adding jumpers"
     >
       <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
         <rect x="3" y="3" width="3" height="3" fill="currentColor" />
@@ -46,7 +47,8 @@
     class="tool-btn"
     disabled={disabled}
     onclick={() => onAutoRoute?.()}
-    title="Route only — keeps current placements"
+    title="Auto-route wires between placed components — keeps current placements unchanged"
+    aria-label="Route: auto-route wires between placed components"
   >
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
       <path d="M2 11 L2 4 L12 4 L12 11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" />
@@ -58,7 +60,8 @@
     class="tool-btn primary-action"
     disabled={disabled}
     onclick={() => onSolve?.()}
-    title="Place + route end to end"
+    title="Auto-place components and auto-route wires end-to-end in one shot"
+    aria-label="Solve: place components and route wires end-to-end"
   >
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
       <path d="M2 7 L6 3 L8 5 L12 1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
@@ -72,7 +75,8 @@
       class="tool-btn"
       disabled={disabled}
       onclick={() => onValidate?.()}
-      title="Run the topological verifier only"
+      title="Check the circuit for topological errors (shorts, opens, missing connections) — no placement or routing changes"
+      aria-label="Validate: check circuit for errors without changing placement or routing"
     >
       <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
         <path d="M3 7.5 L6 10.5 L11.5 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
@@ -86,7 +90,8 @@
       class="tool-btn"
       disabled={disabled}
       onclick={() => onOptimize?.()}
-      title="Local search with routing feedback"
+      title="Iteratively improve component placement using routing feedback — repeatedly reroutes to find a better layout"
+      aria-label="Optimize: iteratively improve component placement using routing feedback"
     >
       <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
         <path d="M7 2 L9 6 L13 7 L9 8 L7 12 L5 8 L1 7 L5 6 Z" fill="currentColor" />

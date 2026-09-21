@@ -49,19 +49,22 @@
   const SCALE = 4;
 
   const boardExtent = $derived.by(() => {
-    let minX = 0;
-    let minY = -15;
-    let maxX = 80;
-    let maxY = 45;
-    if (board.zones.length > 0) {
-      for (const zone of board.zones) {
-        for (const p of zone.polygon) {
-          if (p.x < minX) minX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y > maxY) maxY = p.y;
-        }
+    const DEFAULT = { minX: 0, minY: -15, maxX: 80, maxY: 45 };
+    if (board.zones.length === 0) return DEFAULT;
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const zone of board.zones) {
+      for (const p of zone.polygon) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
       }
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+      return DEFAULT;
     }
     return { minX, minY, maxX, maxY };
   });
@@ -78,39 +81,15 @@
     viewH = boardExtent.maxY - boardExtent.minY + 4;
   });
 
-  const viewBoxAttr = $derived(`${viewX} ${viewY} ${viewW} ${viewH}`);
+  const viewBoxAttr = $derived(
+    `${viewX * SCALE} ${viewY * SCALE} ${viewW * SCALE} ${viewH * SCALE}`
+  );
 
   function toSvgPx(p: Point2D): Point2D {
     return boardToSvg(p, SCALE);
   }
 
-  // ---- Pan/zoom --------------------------------------------------------
-  let isPanning = false;
-  let panStart: { x: number; y: number; vx: number; vy: number } | null = null;
-
-  function onPointerDown(event: PointerEvent): void {
-    if (event.button !== 0) return;
-    isPanning = true;
-    panStart = { x: event.clientX, y: event.clientY, vx: viewX, vy: viewY };
-    (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
-  }
-
-  function onPointerMove(event: PointerEvent): void {
-    if (!isPanning || !panStart) return;
-    const dx = event.clientX - panStart.x;
-    const dy = event.clientY - panStart.y;
-    const svg = event.currentTarget as SVGSVGElement;
-    const worldDx = (dx * viewW) / svg.clientWidth;
-    const worldDy = (dy * viewH) / svg.clientHeight;
-    viewX = panStart.vx - worldDx;
-    viewY = panStart.vy - worldDy;
-  }
-
-  function onPointerUp(event: PointerEvent): void {
-    isPanning = false;
-    panStart = null;
-    (event.currentTarget as Element).releasePointerCapture?.(event.pointerId);
-  }
+  // View is fixed to the board extent (no pan/zoom interactivity).
 
   function onCanvasClick(event: MouseEvent): void {
     if (!jumperToolActive) return;
@@ -152,21 +131,6 @@
       window.removeEventListener('keydown', handler);
     };
   });
-
-  function onWheel(event: WheelEvent): void {
-    event.preventDefault();
-    const factor = event.deltaY > 0 ? 1.1 : 1 / 1.1;
-    const target = event.currentTarget as SVGSVGElement;
-    const rect = target.getBoundingClientRect();
-    const pxX = event.clientX - rect.left;
-    const pxY = event.clientY - rect.top;
-    const worldX = viewX + (pxX / rect.width) * viewW;
-    const worldY = viewY + (pxY / rect.height) * viewH;
-    viewW *= factor;
-    viewH *= factor;
-    viewX = worldX - (pxX / rect.width) * viewW;
-    viewY = worldY - (pxY / rect.height) * viewH;
-  }
 
   export function holeAt(clientX: number, clientY: number): string | null {
     const svg = rootEl;
@@ -309,21 +273,12 @@
     return board.holes.find((h) => h.grid.col === col && h.grid.row === row);
   }
 
-  // Board footprint rectangle (the actual plastic surface). Pulled from
-  // zones with kind="main" so the perfboard case (no zones) renders a
-  // generic rectangle.
+  // Board footprint rectangle (the actual plastic surface). Derived from
+  // the model's own "main" zone so it always matches the hole grid exactly
+  // (both breadboards and perfboards carry a main zone from the backend);
+  // only a boardless-zone model falls back to a generic rectangle.
   const boardFootprint = $derived.by(() => {
-    if (isPerfboard) {
-      return {
-        x: -2,
-        y: -2,
-        w: (board as PerfboardModel).cols * (board as PerfboardModel).pitchMm + 4,
-        h: (board as PerfboardModel).rows * (board as PerfboardModel).pitchMm + 4
-      };
-    }
-    const main = (board as Exclude<AnyBoardModel, PerfboardModel>).zones.find(
-      (z) => z.kind === 'main'
-    );
+    const main = board.zones.find((z) => z.kind === 'main');
     if (main) {
       let minX = Number.POSITIVE_INFINITY;
       let minY = Number.POSITIVE_INFINITY;
@@ -336,6 +291,15 @@
         if (p.y > maxY) maxY = p.y;
       }
       return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }
+    if (isPerfboard) {
+      const p = board as PerfboardModel;
+      return {
+        x: -p.pitchMm / 2,
+        y: -p.pitchMm / 2,
+        w: (p.cols - 1) * p.pitchMm + p.pitchMm,
+        h: (p.rows - 1) * p.pitchMm + p.pitchMm
+      };
     }
     return { x: -2, y: -15, w: 80, h: 60 };
   });
@@ -358,12 +322,7 @@
   class="board-canvas"
   viewBox={viewBoxAttr}
   preserveAspectRatio="xMidYMid meet"
-  onpointerdown={onPointerDown}
-  onpointermove={onPointerMove}
-  onpointerup={onPointerUp}
-  onpointercancel={onPointerUp}
   onclick={onCanvasClick}
-  onwheel={onWheel}
   role="application"
   aria-label={isPerfboard ? 'Perfboard editor canvas' : 'Breadboard editor canvas'}
 >
