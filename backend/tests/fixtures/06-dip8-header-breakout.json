@@ -148,5 +148,6 @@
     },
     "allowCriticalNetClasses": false
   },
-  "footprintOverrides": []
+  "footprintOverrides": [],
+  "schematic": null
 }

@@ -97,6 +97,7 @@ async def create_project(request: Request) -> HTTPResponse:
                 "allowCriticalNetClasses": False,
             },
             "footprintOverrides": [],
+            "schematic": None,
         }
 
     async with get_session() as session:

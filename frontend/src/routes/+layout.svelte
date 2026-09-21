@@ -13,7 +13,7 @@
   const isEditor = $derived($page.url.pathname.startsWith('/projects/'));
 </script>
 
-<div class="shell">
+<div class="shell" class:is-editor={isEditor}>
   <header class="bench-header">
     <a href="/" class="brand">
       <span class="brand-mark" aria-hidden="true">
@@ -57,6 +57,11 @@
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+  }
+
+  .shell.is-editor {
+    height: 100vh;
+    overflow: hidden;
   }
 
   /* The header is a thin instrument-panel strip — single hairline below,

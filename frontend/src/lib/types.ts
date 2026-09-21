@@ -388,6 +388,59 @@ export interface FootprintOverride {
   pinMap: Record<string, string> | null;
 }
 
+export interface SchematicEndpoint {
+  nodeId: string;
+  /** `null` for port nodes, which have exactly one terminal. */
+  pin: string | null;
+}
+
+export interface SchematicConnection {
+  id: string;
+  a: SchematicEndpoint;
+  b: SchematicEndpoint;
+}
+
+export interface SchematicSymbolNode {
+  kind: 'symbol';
+  id: string;
+  ref: string;
+  value: string | null;
+  footprintId: string;
+  /** Pin names captured from the footprint catalog at drop time. */
+  pins: string[];
+  /** Sheet position in grid units (integers). */
+  x: number;
+  y: number;
+  rotation: Orientation;
+}
+
+export type SchematicPortKind = 'ground' | 'power' | 'label';
+
+export interface SchematicPortNode {
+  kind: 'port';
+  id: string;
+  portKind: SchematicPortKind;
+  netName: string;
+  x: number;
+  y: number;
+  rotation: Orientation;
+}
+
+export type SchematicNode = SchematicSymbolNode | SchematicPortNode;
+
+export interface SchematicNetOverride {
+  netName: string;
+  netClass: NetClass;
+  priority: number;
+}
+
+export interface Schematic {
+  version: 1;
+  nodes: SchematicNode[];
+  connections: SchematicConnection[];
+  netOverrides: SchematicNetOverride[];
+}
+
 export interface ProjectDocument {
   format: 'autobreadboard-project';
   version: 1;
@@ -398,6 +451,7 @@ export interface ProjectDocument {
   layout: Layout;
   settings: ProjectSettings;
   footprintOverrides: FootprintOverride[];
+  schematic: Schematic | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -115,8 +115,9 @@
       <span class="eyebrow mono">Workbench</span>
       <h1>Projects</h1>
       <p class="lede">
-        Drop in a netlist JSON, pick a board, and AutoBoard will propose a layout
-        you can edit, verify, and print as an assembly guide.
+        Draw a schematic with the component palette, or drop in a netlist JSON — pick a
+        board and AutoBoard will propose a layout you can edit, verify, and print as an
+        assembly guide.
       </p>
     </div>
 
@@ -200,7 +201,7 @@
           onclick={onCreateProject}
           disabled={isCreating || newProjectName.trim() === '' || newProjectBoardId === null}
         >
-          {isCreating ? 'Creating…' : 'Open empty board'}
+          {isCreating ? 'Creating…' : 'Open schematic'}
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M3 7h8M7 3l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>

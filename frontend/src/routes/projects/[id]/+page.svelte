@@ -3,9 +3,13 @@
     apiFetch,
     createJob,
     validateLayout,
+    updateProjectDocument,
     ApiError
   } from '$lib/api/client';
   import BoardCanvas from '$lib/components/BoardCanvas.svelte';
+  import SchematicCanvas from '$lib/components/SchematicCanvas.svelte';
+  import SymbolPalette from '$lib/components/SymbolPalette.svelte';
+  import SchematicInspector from '$lib/components/SchematicInspector.svelte';
   import DiagnosticsPanel from '$lib/components/DiagnosticsPanel.svelte';
   import NetPanel from '$lib/components/NetPanel.svelte';
   import Toolbar from '$lib/components/Toolbar.svelte';
@@ -16,6 +20,8 @@
   import ExportMenu from '$lib/components/ExportMenu.svelte';
   import { projectStore } from '$lib/state/project.svelte';
   import { debounce } from '$lib/debounce';
+  import { deriveNetlist, pruneLayout } from '$lib/schematic/netlist';
+  import { PORT_PALETTE, nextRef, nextNodeId, paletteEntryFor } from '$lib/schematic/catalog';
   import type {
     AnyBoardModel,
     BoardKind,
@@ -27,6 +33,10 @@
     NetClass,
     Orientation,
     ProjectDocument,
+    Schematic,
+    SchematicEndpoint,
+    SchematicNode,
+    SchematicPortKind,
     TraceLayout
   } from '$lib/types';
   import type { SolverOperation } from '$lib/api/client';
@@ -53,9 +63,18 @@
   let jumperToolActive = $state(false);
   let selectedNetId = $state<string | null>(null);
   let lastResultLayoutId = $state<string | null>(null);
+  let viewMode = $state<'board' | 'schematic'>('board');
+  let armedFootprintId = $state<string | null>(null);
+  let armedPortKind = $state<SchematicPortKind | null>(null);
+  let schematicSelection = $state<{ kind: 'node' | 'connection'; id: string } | null>(null);
+  let reloadToken = $state(0);
+  let lastSavedJson = $state<string | null>(null);
+  let saveState = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  let saveError = $state<string | null>(null);
 
   $effect(() => {
     const id = params.id;
+    void reloadToken;
     let cancelled = false;
 
     async function load(): Promise<void> {
@@ -73,10 +92,17 @@
         for (const fp of footprintsList) footprints[fp.id] = fp;
 
         projectStore.document = envelope.document;
+        projectStore.draftVersion = envelope.draftVersion;
         projectStore.board = board;
         projectStore.boardKind = board.kind;
         projectStore.footprints = footprints;
         projectStore.traceLayout = null;
+        lastSavedJson = JSON.stringify(envelope.document);
+        saveState = 'idle';
+        saveError = null;
+        const hasDrawing = (envelope.document.schematic?.nodes.length ?? 0) > 0;
+        viewMode = hasDrawing || envelope.document.components.length > 0 ? 'board' : 'schematic';
+        schematicSelection = null;
         if (board.kind === 'breadboard') {
           projectStore.pushUndo(envelope.document.layout);
         }
@@ -121,7 +147,41 @@
 
   $effect(() => {
     void projectStore.document?.layout;
+    void projectStore.document?.nets;
     debouncedValidate();
+  });
+
+  async function saveDocument(): Promise<void> {
+    const doc = projectStore.document;
+    if (doc === null) return;
+    const json = JSON.stringify(doc);
+    saveState = 'saving';
+    try {
+      const envelope = await updateProjectDocument(params.id, doc, projectStore.draftVersion);
+      projectStore.draftVersion = envelope.draftVersion;
+      lastSavedJson = json;
+      saveState = 'saved';
+      saveError = null;
+    } catch (err) {
+      saveState = 'error';
+      if (err instanceof ApiError && err.status === 409) {
+        saveError = 'Project changed elsewhere — reloading.';
+        reloadToken += 1;
+      } else {
+        saveError = err instanceof ApiError ? err.message : 'Save failed.';
+      }
+    }
+  }
+
+  const scheduleSave = debounce(() => {
+    void saveDocument();
+  }, 800);
+
+  $effect(() => {
+    const doc = projectStore.document;
+    if (doc === null || isLoading) return;
+    if (JSON.stringify(doc) === lastSavedJson) return;
+    scheduleSave();
   });
 
   function movePlacement(componentRef: string, newAnchorHoleId: string): void {
@@ -208,14 +268,181 @@
     projectStore.applyLayoutMutation(next);
   }
 
+  const EMPTY_SCHEMATIC: Schematic = { version: 1, nodes: [], connections: [], netOverrides: [] };
+  const currentSchematic = $derived(projectStore.document?.schematic ?? EMPTY_SCHEMATIC);
+
+  const selectedSchematicNode = $derived(
+    schematicSelection?.kind === 'node'
+      ? (currentSchematic.nodes.find((n) => n.id === schematicSelection?.id) ?? null)
+      : null
+  );
+
+  function applySchematic(next: Schematic): void {
+    const doc = projectStore.document;
+    if (doc === null) return;
+    const derived = deriveNetlist(next);
+    projectStore.document = {
+      ...doc,
+      schematic: next,
+      components: derived.components,
+      nets: derived.nets,
+      layout: pruneLayout(doc.layout, derived)
+    };
+  }
+
+  function placeSymbol(footprintId: string, x: number, y: number): void {
+    const entry = paletteEntryFor(footprintId);
+    const pinOffsets = projectStore.footprints[footprintId]?.pinOffsets;
+    if (entry === undefined || pinOffsets === undefined) {
+      saveError = `Unknown footprint ${footprintId}`;
+      return;
+    }
+    const pins = Object.keys(pinOffsets).sort((a, b) => Number(a) - Number(b));
+    const existingIds = currentSchematic.nodes.map((n) => n.id);
+    const existingRefs = currentSchematic.nodes
+      .filter((n): n is Extract<SchematicNode, { kind: 'symbol' }> => n.kind === 'symbol')
+      .map((n) => n.ref);
+    const node: SchematicNode = {
+      kind: 'symbol',
+      id: nextNodeId('sym', existingIds),
+      ref: nextRef(entry.refPrefix, existingRefs),
+      value: entry.defaultValue,
+      footprintId,
+      pins,
+      x,
+      y,
+      rotation: 0
+    };
+    applySchematic({ ...currentSchematic, nodes: [...currentSchematic.nodes, node] });
+    armedFootprintId = null;
+  }
+
+  function placePort(portKind: SchematicPortKind, x: number, y: number): void {
+    const entry = PORT_PALETTE.find((p) => p.portKind === portKind);
+    if (entry === undefined) return;
+    const existingIds = currentSchematic.nodes.map((n) => n.id);
+    const node: SchematicNode = {
+      kind: 'port',
+      id: nextNodeId('port', existingIds),
+      portKind,
+      netName: entry.defaultNetName,
+      x,
+      y,
+      rotation: 0
+    };
+    applySchematic({ ...currentSchematic, nodes: [...currentSchematic.nodes, node] });
+    armedPortKind = null;
+  }
+
+  function moveNode(nodeId: string, x: number, y: number): void {
+    applySchematic({
+      ...currentSchematic,
+      nodes: currentSchematic.nodes.map((n) => (n.id === nodeId ? { ...n, x, y } : n))
+    });
+  }
+
+  function rotateNode(nodeId: string): void {
+    const orientations: Orientation[] = [0, 90, 180, 270];
+    applySchematic({
+      ...currentSchematic,
+      nodes: currentSchematic.nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        const idx = orientations.indexOf(n.rotation);
+        return { ...n, rotation: orientations[(idx + 1) % orientations.length] };
+      })
+    });
+  }
+
+  function setNodeRef(nodeId: string, ref: string): void {
+    applySchematic({
+      ...currentSchematic,
+      nodes: currentSchematic.nodes.map((n) => (n.id === nodeId && n.kind === 'symbol' ? { ...n, ref } : n))
+    });
+  }
+
+  function setNodeValue(nodeId: string, value: string | null): void {
+    applySchematic({
+      ...currentSchematic,
+      nodes: currentSchematic.nodes.map((n) => (n.id === nodeId && n.kind === 'symbol' ? { ...n, value } : n))
+    });
+  }
+
+  function setPortNetName(nodeId: string, netName: string): void {
+    applySchematic({
+      ...currentSchematic,
+      nodes: currentSchematic.nodes.map((n) => (n.id === nodeId && n.kind === 'port' ? { ...n, netName } : n))
+    });
+  }
+
+  function deleteSchematicNode(nodeId: string): void {
+    applySchematic({
+      ...currentSchematic,
+      nodes: currentSchematic.nodes.filter((n) => n.id !== nodeId),
+      connections: currentSchematic.connections.filter(
+        (c) => c.a.nodeId !== nodeId && c.b.nodeId !== nodeId
+      )
+    });
+    schematicSelection = null;
+  }
+
+  function connectEndpoints(a: SchematicEndpoint, b: SchematicEndpoint): void {
+    if (a.nodeId === b.nodeId && a.pin === b.pin) return;
+    const exists = currentSchematic.connections.some(
+      (c) =>
+        (c.a.nodeId === a.nodeId && c.a.pin === a.pin && c.b.nodeId === b.nodeId && c.b.pin === b.pin) ||
+        (c.a.nodeId === b.nodeId && c.a.pin === b.pin && c.b.nodeId === a.nodeId && c.b.pin === a.pin)
+    );
+    if (exists) return;
+    const id = nextNodeId('w', currentSchematic.connections.map((c) => c.id));
+    applySchematic({ ...currentSchematic, connections: [...currentSchematic.connections, { id, a, b }] });
+  }
+
+  function deleteSchematicConnection(connectionId: string): void {
+    applySchematic({
+      ...currentSchematic,
+      connections: currentSchematic.connections.filter((c) => c.id !== connectionId)
+    });
+    schematicSelection = null;
+  }
+
+  function onSchematicSelect(kind: 'node' | 'connection' | null, id: string | null): void {
+    schematicSelection = kind !== null && id !== null ? { kind, id } : null;
+  }
+
+  function onSchematicDelete(kind: 'node' | 'connection', id: string): void {
+    if (kind === 'node') deleteSchematicNode(id);
+    else deleteSchematicConnection(id);
+  }
+
   function setSelectedNet(netId: string | null): void {
     selectedNetId = netId;
     projectStore.setSelection(netId === null ? { kind: null, id: null } : { kind: 'net', id: netId });
   }
 
+  function upsertNetOverride(netId: string, patch: { netClass?: NetClass; priority?: number }): void {
+    const doc = projectStore.document;
+    if (doc === null) return;
+    const net = doc.nets.find((n) => n.id === netId);
+    if (net === undefined) return;
+    const existing = currentSchematic.netOverrides.find((o) => o.netName === net.name);
+    const nextOverride = {
+      netName: net.name,
+      netClass: patch.netClass ?? existing?.netClass ?? net.netClass,
+      priority: patch.priority ?? existing?.priority ?? net.priority
+    };
+    const netOverrides = existing
+      ? currentSchematic.netOverrides.map((o) => (o.netName === net.name ? nextOverride : o))
+      : [...currentSchematic.netOverrides, nextOverride];
+    applySchematic({ ...currentSchematic, netOverrides });
+  }
+
   function changeNetClass(netId: string, netClass: NetClass): void {
     const doc = projectStore.document;
     if (doc === null) return;
+    if (doc.schematic !== null) {
+      upsertNetOverride(netId, { netClass });
+      return;
+    }
     const nextDoc: ProjectDocument = {
       ...doc,
       nets: doc.nets.map((n) => (n.id === netId ? { ...n, netClass } : n))
@@ -226,12 +453,17 @@
   function changePriority(netId: string, priority: number): void {
     const doc = projectStore.document;
     if (doc === null) return;
+    if (doc.schematic !== null) {
+      upsertNetOverride(netId, { priority });
+      return;
+    }
     const nextDoc: ProjectDocument = {
       ...doc,
       nets: doc.nets.map((n) => (n.id === netId ? { ...n, priority } : n))
     };
     projectStore.document = nextDoc;
   }
+
 
   async function startOperation(operation: SolverOperation): Promise<void> {
     const doc = projectStore.document;
@@ -410,25 +642,53 @@
     </div>
 
     <div class="ed-header-right">
-      <button
-        type="button"
-        class="tool-button"
-        class:active={jumperToolActive}
-        aria-pressed={jumperToolActive}
-        onclick={() => (jumperToolActive = !jumperToolActive)}
-        title="Click two holes to create a wire (Esc to cancel)"
+      <div class="view-tabs" role="tablist" aria-label="Editor view">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={viewMode === 'schematic'}
+          class:active={viewMode === 'schematic'}
+          onclick={() => (viewMode = 'schematic')}
+        >
+          Schematic
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={viewMode === 'board'}
+          class:active={viewMode === 'board'}
+          onclick={() => (viewMode = 'board')}
+        >
+          Board
+        </button>
+      </div>
+      <span
+        class="save-status mono"
+        data-tone={saveState === 'error' ? 'error' : 'idle'}
       >
-        <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
-          <path d="M2 6.5h9M6.5 2v9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-        </svg>
-        <span>{jumperToolActive ? 'Exit jumper' : 'Jumper tool'}</span>
-      </button>
+        {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? (saveError ?? 'Save failed.') : 'Saved'}
+      </span>
+      {#if viewMode === 'board'}
+        <button
+          type="button"
+          class="tool-button"
+          class:active={jumperToolActive}
+          aria-pressed={jumperToolActive}
+          onclick={() => (jumperToolActive = !jumperToolActive)}
+          title="Click two holes to create a wire (Esc to cancel)"
+        >
+          <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+            <path d="M2 6.5h9M6.5 2v9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
+          <span>{jumperToolActive ? 'Exit jumper' : 'Jumper tool'}</span>
+        </button>
+      {/if}
     </div>
   </header>
 
   <!-- ====================== Toolbar =========================== -->
   <Toolbar
-    disabled={false}
+    disabled={(projectStore.document?.components.length ?? 0) === 0}
     showAutoPlace={projectStore.boardKind !== 'perfboard'}
     showValidate={projectStore.boardKind !== 'perfboard'}
     showOptimize={projectStore.boardKind !== 'perfboard'}
@@ -462,33 +722,87 @@
     <div class="ed-body">
       <div class="canvas-stage">
         <div class="canvas-frame">
-          <BoardCanvas
-            board={projectStore.board}
-            layout={projectStore.boardKind === 'perfboard'
-              ? (projectStore.traceLayout ?? undefined)
-              : projectStore.document.layout}
-            showLabels={true}
-            jumperToolActive={jumperToolActive}
-            jumperStartHoleId={null}
-            selectedId={canvasSelectionId}
-            selectedKind={canvasSelectionKind}
-            onPlacementMove={movePlacement}
-            onRotate={rotatePlacement}
-            onLockToggle={toggleLockPlacement}
-            onDelete={deleteSelection}
-            onJumperCreate={createJumperBetween}
-            onSelect={onSelect}
-          />
+          {#if viewMode === 'schematic'}
+            <SchematicCanvas
+              schematic={currentSchematic}
+              selectedKind={schematicSelection?.kind ?? null}
+              selectedId={schematicSelection?.id ?? null}
+              armedFootprintId={armedFootprintId}
+              armedPortKind={armedPortKind}
+              onSelect={onSchematicSelect}
+              onNodeMove={moveNode}
+              onNodeRotate={rotateNode}
+              onDelete={onSchematicDelete}
+              onConnect={connectEndpoints}
+              onPlaceSymbol={placeSymbol}
+              onPlacePort={placePort}
+            />
+          {:else}
+            <BoardCanvas
+              board={projectStore.board}
+              layout={projectStore.boardKind === 'perfboard'
+                ? (projectStore.traceLayout ?? undefined)
+                : projectStore.document.layout}
+              showLabels={true}
+              jumperToolActive={jumperToolActive}
+              jumperStartHoleId={null}
+              selectedId={canvasSelectionId}
+              selectedKind={canvasSelectionKind}
+              onPlacementMove={movePlacement}
+              onRotate={rotatePlacement}
+              onLockToggle={toggleLockPlacement}
+              onDelete={deleteSelection}
+              onJumperCreate={createJumperBetween}
+              onSelect={onSelect}
+            />
+          {/if}
         </div>
       </div>
 
       <aside class="ed-sidebar" aria-label="Project sidebar">
-        <section class="panel">
-          <header class="panel-header">
-            <h2>Layout readout</h2>
-          </header>
-          <MetricsBar score={projectStore.score} />
-        </section>
+        {#if viewMode === 'schematic'}
+          <section class="panel">
+            <header class="panel-header">
+              <h2>Components</h2>
+            </header>
+            <SymbolPalette
+              armedFootprintId={armedFootprintId}
+              armedPortKind={armedPortKind}
+              onArmSymbol={(id) => {
+                armedFootprintId = armedFootprintId === id ? null : id;
+                armedPortKind = null;
+              }}
+              onArmPort={(kind) => {
+                armedPortKind = armedPortKind === kind ? null : kind;
+                armedFootprintId = null;
+              }}
+            />
+          </section>
+
+          <section class="panel">
+            <header class="panel-header">
+              <h2>Properties</h2>
+            </header>
+            <SchematicInspector
+              node={selectedSchematicNode}
+              takenRefs={currentSchematic.nodes
+                .filter((n) => n.kind === 'symbol' && n.id !== selectedSchematicNode?.id)
+                .map((n) => (n as { ref: string }).ref)}
+              onRefChange={setNodeRef}
+              onValueChange={setNodeValue}
+              onNetNameChange={setPortNetName}
+              onRotate={rotateNode}
+              onDelete={deleteSchematicNode}
+            />
+          </section>
+        {:else}
+          <section class="panel">
+            <header class="panel-header">
+              <h2>Layout readout</h2>
+            </header>
+            <MetricsBar score={projectStore.score} />
+          </section>
+        {/if}
 
         <section class="panel">
           <header class="panel-header">
@@ -544,12 +858,14 @@
           </section>
         {/if}
 
-        <section class="panel">
-          <header class="panel-header">
-            <h2>Export</h2>
-          </header>
-          <ExportMenu layoutId={lastResultLayoutId} boardKind={projectStore.boardKind} />
-        </section>
+        {#if viewMode === 'board'}
+          <section class="panel">
+            <header class="panel-header">
+              <h2>Export</h2>
+            </header>
+            <ExportMenu layoutId={lastResultLayoutId} boardKind={projectStore.boardKind} />
+          </section>
+        {/if}
 
         <SafetyNotice />
       </aside>
@@ -580,7 +896,7 @@
 <style>
   .editor {
     display: grid;
-    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
     flex: 1;
     min-height: 0;
     background: var(--paper-1);
@@ -588,12 +904,21 @@
 
   /* ----- Header strip ----- */
   .ed-header {
+    grid-row: 1;
     display: flex;
     align-items: center;
     gap: var(--sp-3);
     padding: 10px 18px 8px;
     background: var(--paper-2);
     border-bottom: 1px solid var(--paper-edge);
+  }
+
+  .editor > :global(.toolbar) {
+    grid-row: 2;
+  }
+
+  .editor > :global(.job-progress) {
+    grid-row: 3;
   }
 
   .ed-header-left {
@@ -675,8 +1000,50 @@
     border-color: var(--accent-3);
   }
 
+  .view-tabs {
+    display: inline-flex;
+    border: 1px solid var(--paper-edge);
+    border-radius: var(--r-2);
+    overflow: hidden;
+  }
+
+  .view-tabs button {
+    padding: 6px 12px;
+    font-size: var(--fs-13);
+    color: var(--ink-2);
+    background: var(--paper-1);
+    border: none;
+    border-right: 1px solid var(--paper-edge);
+    cursor: pointer;
+  }
+
+  .view-tabs button:last-child {
+    border-right: none;
+  }
+
+  .view-tabs button:hover {
+    background: var(--paper-3);
+    color: var(--ink-1);
+  }
+
+  .view-tabs button.active {
+    background: var(--accent-1);
+    color: #fff;
+  }
+
+  .save-status {
+    font-size: var(--fs-11);
+    color: var(--ink-3);
+  }
+
+  .save-status[data-tone='error'] {
+    color: var(--sev-error);
+    font-weight: 600;
+  }
+
   /* ----- Body grid ----- */
   .ed-body {
+    grid-row: 4;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 360px;
     gap: var(--sp-3);
@@ -698,7 +1065,7 @@
 
   .canvas-frame {
     flex: 1;
-    min-height: 540px;
+    min-height: 0;
     display: flex;
   }
 
@@ -711,6 +1078,14 @@
 
   .canvas-frame :global(.board-canvas:active) {
     cursor: grabbing;
+  }
+
+  .canvas-frame :global(.schematic-canvas) {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
   }
 
   .ed-sidebar {
@@ -815,6 +1190,7 @@
 
   /* ----- Status bar ----- */
   .status-bar {
+    grid-row: 5;
     display: flex;
     align-items: center;
     gap: 0;
@@ -895,6 +1271,7 @@
   /* ----- States ----- */
   .ed-loading,
   .ed-error {
+    grid-row: 4;
     padding: var(--sp-6);
     color: var(--ink-3);
     text-align: center;

@@ -64,6 +64,14 @@ __all__ = [
     "RelativeHole",
     "RouteRequest",
     "RouteResult",
+    "Schematic",
+    "SchematicConnection",
+    "SchematicEndpoint",
+    "SchematicNetOverride",
+    "SchematicNode",
+    "SchematicPortKind",
+    "SchematicPortNode",
+    "SchematicSymbolNode",
     "ScoreRequest",
     "SolveRequest",
     "SolveRequestNetlist",
@@ -525,6 +533,61 @@ class FootprintOverride(WireModel):
     pin_map: dict[str, str] | None = None
 
 
+class SchematicEndpoint(WireModel):
+    node_id: str
+    pin: str | None = None
+
+
+class SchematicConnection(WireModel):
+    id: str
+    a: SchematicEndpoint
+    b: SchematicEndpoint
+
+
+class SchematicSymbolNode(WireModel):
+    kind: Literal["symbol"] = "symbol"
+    id: str
+    ref: str
+    value: str | None = None
+    footprint_id: str
+    pins: list[str]
+    x: int
+    y: int
+    rotation: Orientation = 0
+
+
+SchematicPortKind = Literal["ground", "power", "label"]
+
+
+class SchematicPortNode(WireModel):
+    kind: Literal["port"] = "port"
+    id: str
+    port_kind: SchematicPortKind
+    net_name: str
+    x: int
+    y: int
+    rotation: Orientation = 0
+
+
+SchematicNode = Annotated[
+    SchematicSymbolNode | SchematicPortNode,
+    Field(discriminator="kind"),
+]
+
+
+class SchematicNetOverride(WireModel):
+    net_name: str
+    net_class: NetClass
+    priority: int = 0
+
+
+class Schematic(WireModel):
+    version: Literal[1] = 1
+    nodes: list[SchematicNode] = Field(default_factory=list)
+    connections: list[SchematicConnection] = Field(default_factory=list)
+    net_overrides: list[SchematicNetOverride] = Field(default_factory=list)
+
+
 class ProjectDocument(WireModel):
     format: Literal["autobreadboard-project"] = "autobreadboard-project"
     version: Literal[1] = 1
@@ -535,6 +598,7 @@ class ProjectDocument(WireModel):
     layout: Layout
     settings: ProjectSettings
     footprint_overrides: list[FootprintOverride] = Field(default_factory=list)
+    schematic: Schematic | None = None
 
 
 # --------------------------------------------------------------------------

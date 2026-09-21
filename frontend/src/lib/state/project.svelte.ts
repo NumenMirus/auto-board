@@ -47,6 +47,7 @@ function emptySelection(): Selection {
 
 class ProjectStore {
   document = $state<ProjectDocument | null>(null);
+  draftVersion = $state<number>(1);
   board = $state<AnyBoardModel | null>(null);
   boardKind = $state<BoardKind>('breadboard');
   footprints = $state<Record<string, BreadboardFootprint>>({});
