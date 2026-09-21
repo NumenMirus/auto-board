@@ -277,6 +277,7 @@ def test_failed_partial_attempt_does_not_leave_congestion_usage(monkeypatch: pyt
     )
     assert res.unrouted_nets == ["BUS"]
     assert all(edge.usage == 0 for edges in g.edges_top.values() for edge in edges)
+    assert all(edge.usage == 0 for edges in g.edges_bottom.values() for edge in edges)
 
 
 def test_trace_cost_length_only_with_default_weights() -> None:
