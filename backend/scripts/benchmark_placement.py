@@ -61,7 +61,8 @@ def load_fixture_documents() -> dict[str, ProjectDocument]:
         raise FileNotFoundError(msg)
     docs: dict[str, ProjectDocument] = {}
     for path in paths:
-        document = ProjectDocument.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        with path.open(encoding="utf-8") as handle:
+            document = ProjectDocument.model_validate(json.load(handle))
         docs[path.stem] = document
     return docs
 
