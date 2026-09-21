@@ -55,8 +55,12 @@ def _fixture_paths() -> list[Path]:
 
 
 def load_fixture_documents() -> dict[str, ProjectDocument]:
+    paths = _fixture_paths()
+    if not paths:
+        msg = f"no perfboard benchmark fixtures found under {PERFBOARD_FIXTURE_DIR}"
+        raise FileNotFoundError(msg)
     docs: dict[str, ProjectDocument] = {}
-    for path in _fixture_paths():
+    for path in paths:
         document = ProjectDocument.model_validate(json.loads(path.read_text(encoding="utf-8")))
         docs[path.stem] = document
     return docs
