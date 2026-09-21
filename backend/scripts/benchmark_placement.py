@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import statistics
 import sys
 import time
@@ -28,86 +29,41 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.domain.boards.perfboard import build_perfboard  # noqa: E402
-from app.domain.models import Component, Net, SolverOptions, TraceLayout  # noqa: E402
+from app.domain.boards.registry import get_board_model  # noqa: E402
+from app.domain.models import Component, Net, ProjectDocument, SolverOptions, TraceLayout  # noqa: E402
+from app.domain.models import PerfboardModel  # noqa: E402
 from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS  # noqa: E402
 from app.domain.traces import maze, route as trace_route  # noqa: E402
 from app.domain.traces.place import place_greedy  # noqa: E402
 from app.domain.traces.place_cpsat import solve_cpsat_placement  # noqa: E402
+from app.domain.traces.validate import validate_layout  # noqa: E402
 
 
 # --------------------------------------------------------------------------
-# Hand-crafted perfboard benchmark fixtures (no JSON loader dependency).
-# Mirror the flagship breadboard fixtures' component topology so the
-# comparisons stay meaningful.
+# Perfboard benchmark corpus — schema-valid project JSON documents kept under
+# ``backend/tests/perfboard_fixtures`` so benchmarks and regression tests use
+# the same representative circuits.
 # --------------------------------------------------------------------------
 
-_FIXTURES: dict[str, tuple[list[Component], list[Net]]] = {}
+PERFBOARD_FIXTURE_DIR = ROOT / "tests" / "perfboard_fixtures"
+
+_FIXTURES: dict[str, ProjectDocument] = {}
 
 
-def _register(name: str, components: list[Component], nets: list[Net]) -> None:
-    _FIXTURES[name] = (components, nets)
+def _fixture_paths() -> list[Path]:
+    return sorted(PERFBOARD_FIXTURE_DIR.glob("[0-9][0-9]-*.json"))
 
+
+def load_fixture_documents() -> dict[str, ProjectDocument]:
+    docs: dict[str, ProjectDocument] = {}
+    for path in _fixture_paths():
+        document = ProjectDocument.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        docs[path.stem] = document
+    return docs
 
 def _register_safe() -> None:
-    """Idempotent fixture registration; uses absolute imports to keep the
-    script's top-level readable."""
-    from app.domain.models import PinRef
-
-    _register(
-        "dip14-flagship",
-        [
-            Component(ref="U1", value="74HC14", footprint_id="DIP-14",
-                      pins=[str(i) for i in range(1, 15)]),
-            Component(ref="C1", value="100n", footprint_id="RADIAL-CAP-2P",
-                      pins=["1", "2"]),
-            Component(ref="R1", value="10k", footprint_id="AXIAL-R",
-                      pins=["1", "2"]),
-            Component(ref="R2", value="4.7k", footprint_id="AXIAL-R",
-                      pins=["1", "2"]),
-            Component(ref="D1", value="LED", footprint_id="LED-2P",
-                      pins=["1", "2"]),
-        ],
-        [
-            Net(id="vcc", name="VCC",
-                pins=[PinRef(component_ref="U1", pin="14"),
-                      PinRef(component_ref="C1", pin="1")],
-                net_class="power", priority=0),
-            Net(id="gnd", name="GND",
-                pins=[PinRef(component_ref="U1", pin="7"),
-                      PinRef(component_ref="C1", pin="2")],
-                net_class="ground", priority=0),
-            Net(id="out1", name="OUT1",
-                pins=[PinRef(component_ref="U1", pin="2"),
-                      PinRef(component_ref="D1", pin="1")],
-                net_class="digital", priority=0),
-            Net(id="out2", name="OUT2",
-                pins=[PinRef(component_ref="U1", pin="4"),
-                      PinRef(component_ref="R2", pin="1")],
-                net_class="digital", priority=0),
-        ],
-    )
-    _register(
-        "header-breakout",
-        [
-            Component(ref="HDR1", value="8-pin", footprint_id="HEADER-1x8",
-                      pins=[str(i) for i in range(1, 9)]),
-            Component(ref="U1", value="74HC04", footprint_id="DIP-8",
-                      pins=[str(i) for i in range(1, 9)]),
-            Component(ref="R1", value="10k", footprint_id="AXIAL-R",
-                      pins=["1", "2"]),
-        ],
-        [
-            Net(id="sig1", name="SIG1",
-                pins=[PinRef(component_ref="HDR1", pin="1"),
-                      PinRef(component_ref="U1", pin="1")],
-                net_class="digital", priority=0),
-            Net(id="sig2", name="SIG2",
-                pins=[PinRef(component_ref="HDR1", pin="2"),
-                      PinRef(component_ref="U1", pin="3")],
-                net_class="digital", priority=0),
-        ],
-    )
+    _FIXTURES.clear()
+    _FIXTURES.update(load_fixture_documents())
 
 
 # --------------------------------------------------------------------------
@@ -118,13 +74,17 @@ def _register_safe() -> None:
 def _run_once(
     *,
     engine: str,
-    components: list[Component],
-    nets: list[Net],
+    document: ProjectDocument,
     seed: int,
     preset: str,
 ) -> dict[str, object]:
-    board = build_perfboard(rows=20, cols=30, layers=2, id="strip-20x30-double")
-    initial = TraceLayout(board_id=board.id, placements=[])
+    board = get_board_model(document.board.model_id)
+    if not isinstance(board, PerfboardModel):
+        msg = f"benchmark fixture {document.name!r} is not a perfboard project"
+        raise ValueError(msg)
+    components: list[Component] = document.components
+    nets: list[Net] = document.nets
+    initial = TraceLayout(board_id=board.id, placements=list(document.layout.placements))
     if engine == "cpsat":
         opts = SolverOptions(
             seed=seed,
@@ -163,6 +123,7 @@ def _run_once(
         nets=nets, graph=graph,
     )
     route_ms = (time.perf_counter() - t0) * 1000.0
+    validation = validate_layout(board, PERFBOARD_FOOTPRINTS, components, nets, rr.layout)
     trace_length = sum(t.estimated_length_mm for t in rr.layout.traces)
     via_count = sum(len(t.vias) for t in rr.layout.traces)
     cols = []
@@ -175,14 +136,21 @@ def _run_once(
     span_rows = (max(rows) - min(rows)) if rows else 0
     proxy_total = float(placement.trace.phase_timings_ms.get("cpsat_proxy_total", 0))
     return {
+        "board_id": board.id,
         "place_ms": round(place_ms, 1),
         "route_ms": round(route_ms, 1),
         "placed": len(placement.placements),
+        "components_total": len(components),
         "unrouted": len(rr.unrouted_nets),
+        "validation_errors": sum(1 for d in validation.diagnostics if d.severity == "error"),
         "trace_length_mm": round(trace_length, 2),
         "via_count": via_count,
+        "segment_count": sum(len(t.segments) for t in rr.layout.traces),
         "span_cols": span_cols,
         "span_rows": span_rows,
+        "selected_candidate_index": int(placement.trace.phase_timings_ms.get("cpsat_selected_candidate_index", 0)),
+        "candidate_layout_count": int(placement.trace.phase_timings_ms.get("cpsat_solution_count", 0)),
+        "routed_candidate_count": int(placement.trace.phase_timings_ms.get("cpsat_routed_count", 0)),
         "proxy_total": round(proxy_total, 1),
     }
 
@@ -223,14 +191,14 @@ def main() -> int:
         if fixture_name not in _FIXTURES:
             print(f"[warn] unknown fixture: {fixture_name}", file=sys.stderr)
             continue
-        components, nets = _FIXTURES[fixture_name]
+        document = _FIXTURES[fixture_name]
         for engine in engines:
             for preset in presets:
                 for seed in seeds:
                     try:
                         r = _run_once(
                             engine=engine,
-                            components=components, nets=nets,
+                            document=document,
                             seed=seed, preset=preset,
                         )
                     except Exception as exc:  # noqa: BLE001

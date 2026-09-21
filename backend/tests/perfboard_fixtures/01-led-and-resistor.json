@@ -1,0 +1,113 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Perf LED and resistor",
+  "board": {
+    "modelId": "strip-15x20-double"
+  },
+  "components": [
+    {
+      "ref": "J1",
+      "value": "I/O",
+      "footprintId": "CONN-1x3",
+      "pins": [
+        "1",
+        "2",
+        "3"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "R1",
+      "value": "330R",
+      "footprintId": "AXIAL-R",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "D1",
+      "value": "LED",
+      "footprintId": "LED-2P",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "vin",
+      "name": "VIN",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "R1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "power",
+      "priority": 90,
+      "constraints": []
+    },
+    {
+      "id": "sig",
+      "name": "SIG",
+      "pins": [
+        {
+          "componentRef": "R1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "D1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 40,
+      "constraints": []
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "D1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "J1",
+          "pin": "2"
+        }
+      ],
+      "netClass": "ground",
+      "priority": 100,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "strip-15x20-double",
+    "placements": [],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 7,
+    "solverPreset": "balanced",
+    "placementWeights": {},
+    "routingWeights": {},
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": [],
+  "schematic": null
+}

@@ -1,0 +1,176 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Perf multi terminal power trunk",
+  "board": {
+    "modelId": "strip-20x30-double"
+  },
+  "components": [
+    {
+      "ref": "U1",
+      "value": "74HC14",
+      "footprintId": "DIP-14",
+      "pins": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "C1",
+      "value": "100n",
+      "footprintId": "RADIAL-CAP-2P",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "C2",
+      "value": "10u",
+      "footprintId": "ELECTROLYTIC-CAP-2P",
+      "pins": [
+        "1",
+        "2"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "J1",
+      "value": "PWR-A",
+      "footprintId": "CONN-1x3",
+      "pins": [
+        "1",
+        "2",
+        "3"
+      ],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "J2",
+      "value": "PWR-B",
+      "footprintId": "CONN-1x3",
+      "pins": [
+        "1",
+        "2",
+        "3"
+      ],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "vcc",
+      "name": "VCC",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "J2",
+          "pin": "1"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "14"
+        },
+        {
+          "componentRef": "C1",
+          "pin": "1"
+        },
+        {
+          "componentRef": "C2",
+          "pin": "1"
+        }
+      ],
+      "netClass": "power",
+      "priority": 100,
+      "constraints": []
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "J2",
+          "pin": "2"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "7"
+        },
+        {
+          "componentRef": "C1",
+          "pin": "2"
+        },
+        {
+          "componentRef": "C2",
+          "pin": "2"
+        }
+      ],
+      "netClass": "ground",
+      "priority": 100,
+      "constraints": []
+    },
+    {
+      "id": "sense",
+      "name": "SENSE",
+      "pins": [
+        {
+          "componentRef": "J1",
+          "pin": "3"
+        },
+        {
+          "componentRef": "J2",
+          "pin": "3"
+        },
+        {
+          "componentRef": "U1",
+          "pin": "1"
+        }
+      ],
+      "netClass": "digital",
+      "priority": 55,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "strip-20x30-double",
+    "placements": [],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 7,
+    "solverPreset": "balanced",
+    "placementWeights": {},
+    "routingWeights": {},
+    "allowCriticalNetClasses": false
+  },
+  "footprintOverrides": [],
+  "schematic": null
+}

@@ -860,15 +860,30 @@ def _add_no_good_constraint(
 
 @dataclass(slots=True)
 class _CandidateOutcome:
+    candidate_index: int
     placements: list[ComponentPlacement]
     proxy_breakdown: PlacementObjectiveBreakdown
     trace_cost: float
+    trace_length_mm: float
     via_count: int
     trace_count: int
+    segment_count: int
     unrouted_nets: tuple[str, ...]
     validation_diagnostics: list[Diagnostic]
     placement_status: str  # "FEASIBLE" | "INVALID" | "INFEASIBLE"
     placement_engine_ms: float
+
+
+@dataclass(frozen=True, slots=True)
+class RoutedCandidateRank:
+    validation_error_count: int
+    unrouted_net_count: int
+    trace_length_units: int
+    via_count: int
+    segment_count: int
+    routing_cost_units: int
+    placement_proxy_score: int
+    candidate_index: int
 
 
 def _evaluate_candidate(
@@ -882,6 +897,7 @@ def _evaluate_candidate(
     progress: Callable[[str, int], None] | None,
     proxy_breakdown: PlacementObjectiveBreakdown,
     placement_engine_ms: float,
+    candidate_index: int,
 ) -> _CandidateOutcome | None:
     """Route + validate + score one candidate. Returns None if cancelled."""
     if cancel is not None and cancel():
@@ -907,12 +923,17 @@ def _evaluate_candidate(
         progress("trace-route", progress_marker(route_result.layout))
     placement_errors = [d for d in validation.diagnostics if d.severity == "error"]
     via_count = sum(len(t.vias) for t in route_result.layout.traces)
+    trace_length_mm = sum(t.estimated_length_mm for t in route_result.layout.traces)
+    segment_count = sum(len(t.segments) for t in route_result.layout.traces)
     return _CandidateOutcome(
+        candidate_index=candidate_index,
         placements=candidate,
         proxy_breakdown=proxy_breakdown,
         trace_cost=route_result.trace_cost,
+        trace_length_mm=trace_length_mm,
         via_count=via_count,
         trace_count=len(route_result.layout.traces),
+        segment_count=segment_count,
         unrouted_nets=tuple(route_result.unrouted_nets),
         validation_diagnostics=validation.diagnostics,
         placement_status="INVALID" if placement_errors else "FEASIBLE",
@@ -926,28 +947,24 @@ def progress_marker(layout: TraceLayout) -> int:
 
 
 def _rank_outcomes(outcomes: list[_CandidateOutcome]) -> _CandidateOutcome:
-    """Rank by the brief's priority list:
+    """Rank candidates by actual routed quality before proxy quality."""
 
-    1. placement validity (zero errors)
-    2. zero unrouted nets
-    3. lowest trace_cost
-    4. fewest vias
-    5. fewest traces
-    6. lowest proxy_breakdown.total as final tiebreaker
-    """
-    def key(o: _CandidateOutcome) -> tuple[int, int, float, int, int, int]:
-        validity_ok = o.placement_status == "FEASIBLE"
-        routed_ok = not o.unrouted_nets
-        return (
-            0 if validity_ok else 1,
-            0 if routed_ok else 1,
-            o.trace_cost,
-            o.via_count,
-            o.trace_count,
-            o.proxy_breakdown.total,
+    def validation_error_count(outcome: _CandidateOutcome) -> int:
+        return sum(1 for d in outcome.validation_diagnostics if d.severity == "error")
+
+    def rank(outcome: _CandidateOutcome) -> RoutedCandidateRank:
+        return RoutedCandidateRank(
+            validation_error_count=validation_error_count(outcome),
+            unrouted_net_count=len(outcome.unrouted_nets),
+            trace_length_units=int(round(outcome.trace_length_mm * 100.0)),
+            via_count=outcome.via_count,
+            segment_count=outcome.segment_count,
+            routing_cost_units=int(round(outcome.trace_cost * 100.0)),
+            placement_proxy_score=outcome.proxy_breakdown.total,
+            candidate_index=outcome.candidate_index,
         )
 
-    return min(outcomes, key=key)
+    return min(outcomes, key=rank)
 
 
 # --------------------------------------------------------------------------
@@ -1386,7 +1403,7 @@ def solve_cpsat_placement(
 
     # Routing-aware selection.
     outcomes: list[_CandidateOutcome] = []
-    for placements, breakdown in collected:
+    for candidate_index, (placements, breakdown) in enumerate(collected):
         if cancel is not None and cancel():
             raise SolverCancelled("cpsat placement cancelled during routing")
         outcome = _evaluate_candidate(
@@ -1400,6 +1417,7 @@ def solve_cpsat_placement(
             progress=progress,
             proxy_breakdown=breakdown,
             placement_engine_ms=round((time.perf_counter() - t_start) * 1000.0, 3),
+            candidate_index=candidate_index,
         )
         if outcome is not None:
             outcomes.append(outcome)
@@ -1460,7 +1478,13 @@ def solve_cpsat_placement(
         "cpsat_solution_count": len(collected),
         "cpsat_routed_count": len(outcomes),
         "cpsat_preset_used": 1 if preset_used else 0,
+        "cpsat_selected_candidate_index": best.candidate_index,
         "cpsat_proxy_total": proxy_total,
+        "cpsat_trace_length_mm": round(best.trace_length_mm, 3),
+        "cpsat_via_count": best.via_count,
+        "cpsat_trace_count": best.trace_count,
+        "cpsat_segment_count": best.segment_count,
+        "cpsat_unrouted_count": len(best.unrouted_nets),
     }
     # Stash per-term breakdown into phase_timings_ms under prefixed keys.
     bd = best.proxy_breakdown.as_dict()

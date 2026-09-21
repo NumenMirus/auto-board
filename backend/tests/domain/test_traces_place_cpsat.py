@@ -21,6 +21,7 @@ from ortools.sat.python import cp_model
 from app.domain.boards.perfboard import build_perfboard
 from app.domain.models import (
     Component,
+    Diagnostic,
     ComponentPlacement,
     Net,
     PinRef,
@@ -29,6 +30,10 @@ from app.domain.models import (
 )
 from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS
 from app.domain.traces.place_cpsat import (
+    PlacementObjectiveBreakdown,
+    RoutedCandidateRank,
+    _CandidateOutcome,
+    _rank_outcomes,
     _add_no_good_constraint,
     add_objective_terms,
     build_candidate_poses,
@@ -364,3 +369,46 @@ def test_infeasible_design_does_not_crash() -> None:
     assert result.unplaced == ["U1"]
     assert result.placements == []
     assert result.trace.phase_timings_ms.get("place", 0) > 0
+
+
+def test_route_first_ranking_prefers_routable_candidate_over_better_proxy() -> None:
+    worse_proxy = _CandidateOutcome(
+        candidate_index=0,
+        placements=[],
+        proxy_breakdown=PlacementObjectiveBreakdown(total=10),
+        trace_cost=500.0,
+        trace_length_mm=500.0,
+        via_count=3,
+        trace_count=2,
+        segment_count=8,
+        unrouted_nets=("N1",),
+        validation_diagnostics=[],
+        placement_status="FEASIBLE",
+        placement_engine_ms=1.0,
+    )
+    better_route = _CandidateOutcome(
+        candidate_index=1,
+        placements=[],
+        proxy_breakdown=PlacementObjectiveBreakdown(total=200),
+        trace_cost=120.0,
+        trace_length_mm=120.0,
+        via_count=1,
+        trace_count=2,
+        segment_count=4,
+        unrouted_nets=(),
+        validation_diagnostics=[
+            Diagnostic(id="d-ok", severity="info", code="OK", message="ok")
+        ],
+        placement_status="FEASIBLE",
+        placement_engine_ms=1.0,
+    )
+    best = _rank_outcomes([worse_proxy, better_route])
+    assert best is better_route
+
+
+def test_routed_candidate_rank_orders_validation_then_routing_then_proxy() -> None:
+    a = RoutedCandidateRank(1, 0, 100, 0, 1, 100, 0, 0)
+    b = RoutedCandidateRank(0, 1, 10, 0, 1, 10, 0, 1)
+    c = RoutedCandidateRank(0, 0, 200, 0, 1, 200, 0, 2)
+    d = RoutedCandidateRank(0, 0, 200, 0, 1, 200, 10, 3)
+    assert min([a, b, c, d]) is c
