@@ -24,6 +24,7 @@ from app.domain.traces import maze
 from app.domain.traces.cost import trace_cost
 from app.domain.traces.route import route as route_traces
 from app.domain.traces.score import score_layout
+from app.domain.traces.solve import place_only as place_only_traces
 from app.domain.traces.solve import route_only as route_only_traces
 from app.domain.traces.solve import solve as solve_traces
 from app.domain.traces.validate import validate_layout
@@ -334,6 +335,37 @@ def test_solve_places_components_from_empty_layout() -> None:
     codes = {d.code for d in res.diagnostics}
     assert "UNROUTED_TERMINAL" in codes
     assert res.score.error_count == 1
+
+
+def test_place_only_places_every_component_and_adds_no_traces() -> None:
+    """`trace-place` places every unlocked component without routing — the
+    perfboard counterpart of the breadboard `place` op."""
+    board = get_board_model("strip-20x30-double")
+    components = [
+        Component(ref="D1", value=None, footprint_id="LED-2P", pins=["1", "2"]),
+        Component(ref="U1", value=None, footprint_id="DIP-14", pins=[str(i) for i in range(1, 15)]),
+    ]
+    nets = [
+        Net(id="net-gnd", name="GND", pins=[PinRef(component_ref="U1", pin="1")], net_class="ground", priority=0),
+        Net(
+            id="net-n-1",
+            name="N$1",
+            pins=[PinRef(component_ref="D1", pin="2"), PinRef(component_ref="U1", pin="13")],
+            net_class="digital",
+            priority=0,
+        ),
+    ]
+    res = place_only_traces(
+        board=board,
+        footprints=PERFBOARD_FOOTPRINTS,
+        components=components,
+        nets=nets,
+        options=SolverOptions(),
+        initial_layout=TraceLayout(board_id=board.id, placements=[]),
+    )
+    assert len(res.layout.placements) == len(components)
+    assert {p.component_ref for p in res.layout.placements} == {"D1", "U1"}
+    assert res.layout.traces == []
 
 
 def test_route_only_does_not_place_anything() -> None:

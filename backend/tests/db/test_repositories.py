@@ -12,14 +12,17 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db.base import Base
+from app.db.models import Layout, ProjectRevision, SolverJob
 from app.db.session import reset_engine
 from app.repositories.errors import ConflictError
 from app.repositories.jobs import create_job, get_job_by_idempotency_key
-from app.repositories.projects import create_project, update_project_document
+from app.repositories.layouts import create_layout
+from app.repositories.projects import create_project, delete_project, update_project_document
 from app.repositories.revisions import create_revision, list_revisions
 
 pytestmark = pytest.mark.skipif(
@@ -162,6 +165,68 @@ async def test_solver_jobs_idempotency_unique_constraint_rejects_duplicate(
     assert found is not None
     assert found.id == first.id
     assert found.seed == 12345
+
+
+async def test_delete_project_cascades_dependent_rows(
+    db_session: AsyncSession,
+) -> None:
+    """Deleting a project also removes its revisions, solver jobs, and layouts —
+    the FKs on those tables carry ``ON DELETE CASCADE`` (see
+    `alembic/versions/0005_project_delete_cascade.py`)."""
+    project = await create_project(
+        db_session,
+        name="p",
+        board_model_id="half-400-standard-split-rails",
+        document={"x": 0},
+    )
+    await db_session.commit()
+    project_id = project.id
+
+    revision = await create_revision(db_session, project_id, {"x": 1})
+    await db_session.commit()
+
+    job = await create_job(
+        db_session,
+        project_id=project_id,
+        revision_id=revision.id,
+        operation="solve",
+        seed=1,
+        options={"preset": "balanced"},
+        idempotency_key=None,
+        requested_by=None,
+    )
+    await db_session.commit()
+
+    await create_layout(
+        db_session,
+        project_id=project_id,
+        revision_id=revision.id,
+        source="solver",
+        solver_job_id=job.id,
+        layout={},
+        score=None,
+        diagnostics=None,
+    )
+    await db_session.commit()
+
+    assert await delete_project(db_session, project_id) is True
+    await db_session.commit()
+
+    remaining_jobs = (
+        await db_session.execute(select(SolverJob).where(SolverJob.project_id == project_id))
+    ).scalars().all()
+    remaining_layouts = (
+        await db_session.execute(select(Layout).where(Layout.project_id == project_id))
+    ).scalars().all()
+    remaining_revisions = (
+        await db_session.execute(select(ProjectRevision).where(ProjectRevision.project_id == project_id))
+    ).scalars().all()
+    assert remaining_jobs == []
+    assert remaining_layouts == []
+    assert remaining_revisions == []
+
+    # A second delete of the same (now-gone) project must report no row removed.
+    assert await delete_project(db_session, project_id) is False
 
 
 # ---------------------------------------------------------------------------

@@ -482,7 +482,9 @@
           ? 'trace-route'
           : operation === 'solve'
             ? 'trace-solve'
-            : operation
+            : operation === 'place'
+              ? 'trace-place'
+              : operation
         : operation;
     try {
       const seed = doc.settings.seed;
@@ -613,11 +615,23 @@
 
   // Derived status for the bottom status bar.
   const boardKindLabel = $derived(projectStore.boardKind === 'perfboard' ? 'Perfboard' : 'Breadboard');
-  const placedCount = $derived(
-    projectStore.boardKind === 'perfboard'
-      ? (projectStore.traceLayout?.placements.length ?? 0)
-      : (projectStore.document?.layout.placements.length ?? 0)
-  );
+  const placedCount = $derived(projectStore.document?.layout.placements.length ?? 0);
+  // Placements always come from the document (both board families, persisted by
+  // autosave); a perfboard's traces/vias come from the last applied trace job, which is
+  // store-only until the next trace-solve/trace-route job overwrites it.
+  const boardLayout = $derived.by((): Layout | TraceLayout | undefined => {
+    const doc = projectStore.document;
+    if (doc === null) return undefined;
+    if (projectStore.boardKind !== 'perfboard') return doc.layout;
+    const solved = projectStore.traceLayout;
+    return {
+      version: 1,
+      boardId: doc.board.modelId,
+      placements: doc.layout.placements,
+      traces: solved?.traces ?? [],
+      vias: solved?.vias ?? []
+    };
+  });
   const totalCount = $derived(projectStore.document?.components.length ?? 0);
   const jumperCount = $derived(
     projectStore.boardKind === 'perfboard'
@@ -727,7 +741,6 @@
   <!-- ====================== Toolbar =========================== -->
   <Toolbar
     disabled={(projectStore.document?.components.length ?? 0) === 0}
-    showAutoPlace={projectStore.boardKind !== 'perfboard'}
     showValidate={projectStore.boardKind !== 'perfboard'}
     showOptimize={projectStore.boardKind !== 'perfboard'}
     onAutoPlace={() => void startOperation('place')}
@@ -778,9 +791,7 @@
           {:else}
             <BoardCanvas
               board={projectStore.board}
-              layout={projectStore.boardKind === 'perfboard'
-                ? (projectStore.traceLayout ?? undefined)
-                : projectStore.document.layout}
+              layout={boardLayout}
               showLabels={true}
               jumperToolActive={jumperToolActive}
               jumperStartHoleId={null}

@@ -51,6 +51,7 @@ from app.domain.models import (
     TraceLayout,
 )
 from app.domain.perfboards.registry import PERFBOARD_FOOTPRINTS
+from app.domain.traces.solve import place_only as trace_place_only
 from app.domain.traces.solve import route_only as trace_route_only
 from app.domain.traces.solve import solve as trace_solve
 from app.repositories import jobs as jobs_repo
@@ -253,7 +254,7 @@ async def run_solver_job(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[s
         # Perfboard path: dispatch to the trace pipeline when the board is a
         # PerfboardModel. Every other operation below assumes a breadboard.
         if isinstance(board, PerfboardModel):
-            if op not in ("trace-route", "trace-solve"):
+            if op not in ("trace-place", "trace-route", "trace-solve"):
                 raise DomainError(f"operation {op!r} is not valid for perfboard {board.id!r}")
             perf_result = await _run_perfboard_pipeline(
                 op=op,
@@ -589,12 +590,18 @@ async def _run_perfboard_pipeline(
     """Run the perfboard trace pipeline and return its results.
 
     ``trace-solve`` places every unlocked component then routes the result
-    (`app.domain.traces.solve.solve`); ``trace-route`` routes the placements
-    already present in ``layout`` verbatim, without placing anything
+    (`app.domain.traces.solve.solve`); ``trace-place`` places every unlocked component
+    without routing (`app.domain.traces.solve.place_only`); ``trace-route`` routes the
+    placements already present in ``layout`` verbatim, without placing anything
     (`app.domain.traces.solve.route_only`).
     """
     initial_layout = TraceLayout(board_id=board.id, placements=list(layout.placements))
-    pipeline = trace_solve if op == "trace-solve" else trace_route_only
+    if op == "trace-solve":
+        pipeline = trace_solve
+    elif op == "trace-place":
+        pipeline = trace_place_only
+    else:
+        pipeline = trace_route_only
     t0 = time.perf_counter()
     solved = await asyncio.to_thread(
         pipeline,

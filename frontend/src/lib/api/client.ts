@@ -195,7 +195,8 @@ export type SolverOperation =
   | 'validate'
   | 'export'
   | 'trace-route'
-  | 'trace-solve';
+  | 'trace-solve'
+  | 'trace-place';
 
 export interface SolverOptions {
   seed?: number;

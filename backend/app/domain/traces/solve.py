@@ -28,7 +28,7 @@ from app.domain.traces.place import place as place_perfboard
 from app.domain.traces.score import score_layout
 from app.domain.traces.validate import validate_layout
 
-__all__ = ["SolveResult", "route_only", "solve"]
+__all__ = ["SolveResult", "place_only", "route_only", "solve"]
 
 
 @dataclass(slots=True)
@@ -161,6 +161,74 @@ def solve(
         layout=routed_layout,
         score=score,
         diagnostics=diagnostics,
+        trace=trace,
+    )
+
+
+def place_only(
+    *,
+    board: PerfboardModel,
+    footprints: dict[str, ThroughHoleFootprint],
+    components: list[Component],
+    nets: list[Net],
+    options: SolverOptions,
+    initial_layout: TraceLayout | None = None,
+    cancel: Callable[[], bool] | None = None,
+    progress: Callable[[str, int], None] | None = None,
+) -> SolveResult:
+    """Place every unlocked component onto the perfboard grid — no routing phase. This is
+    the `trace-place` job operation: the perfboard counterpart of the breadboard `place` op
+    (`app.domain.place.place`). The returned layout is placed but unrouted, so the
+    diagnostics from `validate_layout` will include `UNROUTED_TERMINAL` for every net —
+    that mirrors the breadboard `place` op reporting `NET_OPEN` on its unrouted layout.
+    """
+    if progress is not None:
+        progress("place", 0)
+    layout = initial_layout or TraceLayout(board_id=board.id, placements=[])
+
+    placement = place_perfboard(
+        board=board,
+        footprints=footprints,
+        components=components,
+        nets=nets,
+        options=options,
+        initial_layout=layout,
+    )
+    placed_layout = TraceLayout(board_id=board.id, placements=placement.placements)
+
+    if progress is not None:
+        progress("verify", 90)
+    validation = validate_layout(board, footprints, components, nets, placed_layout)
+
+    placed = {p.component_ref for p in placed_layout.placements}
+    components_placed = sum(1 for c in components if c.ref in placed)
+    score = score_layout(
+        placements=placed_layout.placements,
+        components_placed=components_placed,
+        components_total=len(components),
+        layout=placed_layout,
+        diagnostics=validation.diagnostics,
+        placement_cost=placement.cost,
+    )
+
+    trace = SolverTrace(
+        seed=options.seed,
+        placement_order=placement.trace.placement_order,
+        pose_choices=placement.trace.pose_choices,
+        rejections=placement.trace.rejections,
+        failed_nets=[],
+        ripups=[],
+        iteration_scores=placement.trace.iteration_scores,
+        phase_timings_ms=placement.trace.phase_timings_ms,
+    )
+
+    if progress is not None:
+        progress("done", 100)
+
+    return SolveResult(
+        layout=placed_layout,
+        score=score,
+        diagnostics=validation.diagnostics,
         trace=trace,
     )
 

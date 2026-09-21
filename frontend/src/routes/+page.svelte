@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { apiFetch, ApiError, listBoardModels, createProject } from '$lib/api/client';
+  import { apiFetch, ApiError, listBoardModels, createProject, deleteProject } from '$lib/api/client';
   import type { BoardModelSummary } from '$lib/api/client';
   import type { BoardKind, ProjectDocument, ProjectListResponse } from '$lib/types';
   import { goto } from '$app/navigation';
@@ -8,6 +8,9 @@
   let loadError = $state<string | null>(null);
   let uploadStatus = $state<string | null>(null);
   let isUploading = $state(false);
+  let pendingDeleteId = $state<string | null>(null);
+  let deletingId = $state<string | null>(null);
+  let deleteError = $state<string | null>(null);
 
   // ---- New-project form --------------------------------------------------
   let boardModels = $state<BoardModelSummary[] | null>(null);
@@ -28,6 +31,20 @@
       projects = await apiFetch<ProjectListResponse>('/projects');
     } catch (err) {
       loadError = err instanceof ApiError ? err.message : 'Failed to load projects.';
+    }
+  }
+
+  async function onDeleteProject(id: string): Promise<void> {
+    deletingId = id;
+    deleteError = null;
+    try {
+      await deleteProject(id);
+      pendingDeleteId = null;
+      await refresh();
+    } catch (err) {
+      deleteError = err instanceof ApiError ? err.message : 'Failed to delete project.';
+    } finally {
+      deletingId = null;
     }
   }
 
@@ -282,6 +299,9 @@
         <p>Start with an empty board above, or drop in a netlist JSON.</p>
       </div>
     {:else if projects}
+      {#if deleteError}
+        <p class="error mono">{deleteError}</p>
+      {/if}
       <ul class="project-list">
         {#each projects.items as project (project.id)}
           <li>
@@ -295,6 +315,24 @@
                 <span class="meta-arrow" aria-hidden="true">→</span>
               </div>
             </a>
+            <div class="row-actions">
+              {#if pendingDeleteId === project.id}
+                <button
+                  type="button"
+                  class="row-btn danger"
+                  disabled={deletingId === project.id}
+                  onclick={() => void onDeleteProject(project.id)}
+                >{deletingId === project.id ? 'Deleting…' : 'Confirm'}</button>
+                <button type="button" class="row-btn" onclick={() => (pendingDeleteId = null)}>Cancel</button>
+              {:else}
+                <button
+                  type="button"
+                  class="row-btn"
+                  aria-label={`Delete project ${project.name}`}
+                  onclick={() => (pendingDeleteId = project.id)}
+                >Delete</button>
+              {/if}
+            </div>
           </li>
         {/each}
       </ul>
@@ -662,8 +700,50 @@
     border-top: 1px solid var(--paper-edge);
   }
 
+  .project-list li {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding-right: var(--sp-3);
+  }
+
+  .row-actions {
+    display: inline-flex;
+    gap: var(--sp-2);
+    flex: 0 0 auto;
+  }
+
+  .row-btn {
+    font-family: inherit;
+    font-size: var(--fs-11);
+    padding: 4px 10px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--paper-edge);
+    background: var(--paper-1);
+    color: var(--ink-3);
+    cursor: pointer;
+  }
+
+  .row-btn:hover:not(:disabled) {
+    background: var(--paper-2);
+    color: var(--ink-1);
+  }
+
+  .row-btn.danger {
+    color: var(--sev-error);
+    border-color: var(--sev-error-line);
+    background: var(--sev-error-soft);
+  }
+
+  .row-btn:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+
   .project-list a {
     display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3);

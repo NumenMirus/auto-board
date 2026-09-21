@@ -34,11 +34,12 @@ def test_seed_upsert_writes_kind_field() -> None:
 
 
 def test_solver_jobs_operation_literal_includes_trace_routes() -> None:
-    """The jobs API now accepts trace-route and trace-solve as operations."""
+    """The jobs API now accepts trace-route, trace-solve, and trace-place as operations."""
     from app.api.jobs import _VALID_OPERATIONS
 
     assert "trace-route" in _VALID_OPERATIONS
     assert "trace-solve" in _VALID_OPERATIONS
+    assert "trace-place" in _VALID_OPERATIONS
     # Breadboard operations are still valid
     assert "place" in _VALID_OPERATIONS
     assert "solve" in _VALID_OPERATIONS

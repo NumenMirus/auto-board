@@ -151,11 +151,18 @@ class ProjectStore {
     this.currentLayout = newLayout;
   }
 
-  // Perfboard equivalent of `applyLayoutMutation`: replaces the trace
-  // layout outright (no undo history — perfboard layouts are re-solved
-  // from the placement, never hand-edited trace-by-trace).
+  // Perfboard equivalent of `applyLayoutMutation`: replaces the trace layout outright (no
+  // undo history — perfboard traces are re-solved from the placement, never hand-edited
+  // trace-by-trace) and mirrors the new placements into `document.layout.placements` so
+  // the existing document autosave effect persists them for both board families.
   applyTraceLayout(newLayout: TraceLayout): void {
     this.traceLayout = newLayout;
+    if (this.document !== null) {
+      this.document = {
+        ...this.document,
+        layout: { ...this.document.layout, placements: newLayout.placements }
+      };
+    }
   }
 
   clearJob(): void {

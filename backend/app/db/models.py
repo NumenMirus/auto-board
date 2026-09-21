@@ -135,9 +135,11 @@ class Layout(Base):
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    project_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
     revision_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("project_revisions.id"), nullable=True
+        PG_UUID(as_uuid=True), ForeignKey("project_revisions.id", ondelete="CASCADE"), nullable=True
     )
     source: Mapped[str] = mapped_column(String, nullable=False)
     solver_job_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
@@ -163,7 +165,7 @@ class SolverJob(Base):
     __table_args__ = (
         CheckConstraint(
             "operation IN ('place','route','solve','optimize','validate','export',"
-            "'trace-route','trace-solve')",
+            "'trace-route','trace-solve','trace-place')",
             name="ck_solver_jobs_operation_allowed",
         ),
         CheckConstraint(
@@ -188,9 +190,11 @@ class SolverJob(Base):
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    project_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
     revision_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("project_revisions.id"), nullable=True
+        PG_UUID(as_uuid=True), ForeignKey("project_revisions.id", ondelete="CASCADE"), nullable=True
     )
     operation: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
@@ -265,10 +269,12 @@ class Export(Base):
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    project_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
     revision_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     layout_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("layouts.id"), nullable=True
+        PG_UUID(as_uuid=True), ForeignKey("layouts.id", ondelete="CASCADE"), nullable=True
     )
     format: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
@@ -325,7 +331,9 @@ class FootprintOverrideRow(Base):
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    project_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
     component_ref: Mapped[str] = mapped_column(Text, nullable=False)
     footprint_id: Mapped[str] = mapped_column(Text, nullable=False)
     pin_map: Mapped[dict[str, str] | None] = mapped_column(JSONB, nullable=True)

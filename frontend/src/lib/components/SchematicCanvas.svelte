@@ -9,10 +9,12 @@
   import {
     elbowPath,
     terminalPositions,
+    screenToGrid,
     SCHEMATIC_SCALE,
     SHEET_W,
     SHEET_H
   } from '../schematic/geometry';
+  import { routeSchematic, pathFromPoints } from '../schematic/route';
   import { shapeFor } from '../schematic/catalog';
   import SchematicSymbol from './SchematicSymbol.svelte';
 
@@ -109,6 +111,11 @@
     return map;
   });
 
+  // Obstacle-aware routed polyline per connection id. Recomputes only when
+  // `schematic` changes (node drags render through `ghostPos`, not this),
+  // so there is no per-frame routing cost.
+  const wirePaths = $derived(routeSchematic(schematic));
+
   function strokeFor(cls: ConnClass): string {
     if (cls === 'ground') return 'var(--wire-gnd)';
     if (cls === 'power') return 'var(--wire-vcc)';
@@ -199,24 +206,13 @@
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
-    const localX = clientX - rect.left;
-    const localY = clientY - rect.top;
-    // Convert local CSS pixels into SVG-world coords (post-pan/zoom) using
-    // the inverse of the SVG's current screen CTM. That gives us the point
-    // in the inner group's local space — which is exactly SHEET_W * scale
-    // units at no zoom, half that at zoom 2×, etc.
     const ctm = svg.getScreenCTM();
     if (!ctm) return { x: 0, y: 0 };
-    const inverse = ctm.inverse();
-    const svgLocalX = inverse.a * localX + inverse.c * localY + inverse.e;
-    const svgLocalY = inverse.b * localX + inverse.d * localY + inverse.f;
-    // Inner content is in SHEET_W units at scale 1. The inner group's
-    // scale is `zoom`, so divide by (zoom * SCHEMATIC_SCALE) to get grid
-    // units that `terminalOffsets` / `symbolBox` work in.
-    return {
-      x: svgLocalX / (zoom * SCHEMATIC_SCALE),
-      y: svgLocalY / (zoom * SCHEMATIC_SCALE)
-    };
+    // Pass absolute (clientX, clientY) — the screen CTM's `e`/`f` translation
+    // already encodes the SVG box's offset from the page origin. Subtracting
+    // `rect.left`/`rect.top` first would double-subtract that offset and
+    // shift every drop far from the cursor.
+    return screenToGrid(clientX, clientY, ctm, zoom * SCHEMATIC_SCALE);
   }
 
   // ---- Node pointer interactions -------------------------------------------
@@ -527,21 +523,18 @@
         {@const aPos = aPositions[aKey]}
         {@const bPos = bPositions[bKey]}
         {#if aPos && bPos}
-          {@const ax = aPos.x * SCHEMATIC_SCALE}
-          {@const ay = aPos.y * SCHEMATIC_SCALE}
-          {@const bx = bPos.x * SCHEMATIC_SCALE}
-          {@const by = bPos.y * SCHEMATIC_SCALE}
           {@const cls = connectionClass.get(conn.id) ?? 'other'}
           {@const isSelected = selectedKind === 'connection' && selectedId === conn.id}
+          {@const d = pathFromPoints(wirePaths.get(conn.id) ?? [aPos, bPos], SCHEMATIC_SCALE)}
           <path
-            d={elbowPath({ x: ax, y: ay }, { x: bx, y: by })}
+            {d}
             fill="none"
             stroke={strokeFor(cls)}
             stroke-width={isSelected ? 2.4 : 1.6}
             data-connection-id={conn.id}
           />
           <path
-            d={elbowPath({ x: ax, y: ay }, { x: bx, y: by })}
+            {d}
             fill="none"
             stroke="transparent"
             stroke-width="8"
@@ -567,7 +560,8 @@
     {/each}
   </g>
 
-  <!-- Pending-wire rubber band. -->
+  <!-- Pending-wire rubber band: stays on the cheap 3-segment elbow (not the
+       obstacle router) because it recomputes on every pointermove. -->
   {#if pendingEndpoint !== null && pendingAbsPos !== null && cursorGrid !== null}
     {@const px = pendingAbsPos.x * SCHEMATIC_SCALE}
     {@const py = pendingAbsPos.y * SCHEMATIC_SCALE}

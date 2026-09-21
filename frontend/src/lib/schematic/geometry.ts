@@ -1,5 +1,5 @@
 import type { Point2D } from '../geometry';
-import type { SchematicNode } from '$lib/types';
+import type { SchematicNode, SchematicPortKind } from '$lib/types';
 import type { SymbolShape } from './catalog';
 import { shapeFor } from './catalog';
 
@@ -89,6 +89,64 @@ export function symbolBox(shape: SymbolShape, pins: readonly string[]): SymbolBo
   }
   // header, connector, unknown
   return { w: 5, h: Math.max(1, pins.length) };
+}
+
+export interface SymbolRect {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** Convert an absolute CSS pointer position to sheet-grid coordinates using
+ *  an SVG element's screen CTM. The CTM maps SVG viewBox coords to screen
+ *  pixels — including the SVG box's offset from the page origin — so the
+ *  inverse must be applied to absolute `(clientX, clientY)`, NOT to a
+ *  `(clientX - rect.left, clientY - rect.top)` offset. Subtracting the rect
+ *  offset before the inverse double-subtracts the CTM translation and lands
+ *  every drop far from the cursor. */
+export interface CtmInput {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+}
+
+export function screenToGrid(
+  clientX: number,
+  clientY: number,
+  ctm: CtmInput,
+  scale: number
+): { x: number; y: number } {
+  const det = ctm.a * ctm.d - ctm.b * ctm.c;
+  if (det === 0) return { x: 0, y: 0 };
+  const sxw = (ctm.d * clientX - ctm.c * clientY + (ctm.c * ctm.f - ctm.d * ctm.e)) / det;
+  const syw = (-ctm.b * clientX + ctm.a * clientY + (ctm.b * ctm.e - ctm.a * ctm.f)) / det;
+  return { x: sxw / scale, y: syw / scale };
+}
+
+/** Drawn extents in unrotated grid space (origin = pin-0 terminal).
+ *  Values mirror the symbol components in `lib/schematic/symbols/`; keep the
+ *  two in sync when a symbol drawing changes. */
+export function symbolBounds(shape: SymbolShape, pins: readonly string[]): SymbolRect {
+  if (TWO_PIN_SHAPES.has(shape)) return { minX: 0, minY: -2.1, maxX: 6, maxY: 1.3 };
+  if (shape === 'transistor') return { minX: 0, minY: 0, maxX: 5, maxY: 4 };
+  if (shape === 'ic') {
+    const half = Math.max(1, Math.floor(pins.length / 2));
+    return { minX: 0, minY: 0.5, maxX: 12, maxY: half + 0.5 };
+  }
+  if (shape === 'switch') return { minX: 0, minY: 0, maxX: 6, maxY: 3 };
+  return { minX: 0, minY: -0.5, maxX: 5, maxY: Math.max(1, pins.length) - 0.5 };
+}
+
+/** Drawn extents of a port glyph in grid units (the canvas draws these in
+ *  SVG px at `SCHEMATIC_SCALE`; these are those numbers divided by 10). */
+export function portBounds(portKind: SchematicPortKind): SymbolRect {
+  if (portKind === 'ground') return { minX: -0.3, minY: 0, maxX: 0.3, maxY: 1.9 };
+  if (portKind === 'power') return { minX: -1.5, minY: -1.7, maxX: 1.5, maxY: 0.1 };
+  return { minX: -0.3, minY: -1.9, maxX: 3.3, maxY: 0.1 };
 }
 
 /** Absolute sheet position of every terminal, rotation applied about the node origin. */

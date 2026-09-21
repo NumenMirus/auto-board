@@ -41,7 +41,7 @@ bp = Blueprint("jobs", url_prefix="/api/v1")
 
 
 _VALID_OPERATIONS: frozenset[str] = frozenset(
-    {"place", "route", "solve", "optimize", "validate", "export", "trace-route", "trace-solve"}
+    {"place", "route", "solve", "optimize", "validate", "export", "trace-route", "trace-solve", "trace-place"}
 )
 
 

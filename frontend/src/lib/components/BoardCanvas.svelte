@@ -490,7 +490,7 @@
   {#if layout}
     <ComponentLayer
       {board}
-      placements={!isTraceLayout(layout) ? layout.placements : []}
+      placements={layout.placements}
       {SCALE}
       {toSvgPx}
       selectedId={selectedKind === 'component' ? selectedId : null}
