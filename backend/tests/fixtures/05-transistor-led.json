@@ -246,7 +246,9 @@
       "criticalViolation": 500.0,
       "unroutedTerminal": 10000.0
     },
-    "allowCriticalNetClasses": false
+    "allowCriticalNetClasses": false,
+    "placementTimeLimitMs": null,
+    "placementSolutionCount": null
   },
   "footprintOverrides": [],
   "schematic": null

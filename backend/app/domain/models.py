@@ -532,10 +532,11 @@ class ProjectSettings(WireModel):
     routing_weights: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_ROUTING_WEIGHTS))
     allow_critical_net_classes: bool = False
     # CP-SAT placer budget; the legacy greedy placer ignores these.
-    # Defaults match `SolverOptions`; raise placement_time_limit_ms above 3000
-    # so CP-SAT has time to find a routed solution on small perfboard fixtures.
-    placement_time_limit_ms: int = Field(default=15000, ge=100, le=120000)
-    placement_solution_count: int = Field(default=5, ge=1, le=20)
+    # Defaults are ``None`` so fixtures — which serialise them explicitly as
+    # ``null`` — round-trip byte-identically; consumers that need a real
+    # number fall back to ``SolverOptions`` defaults when these are ``None``.
+    placement_time_limit_ms: int | None = Field(default=None, ge=100, le=120000)
+    placement_solution_count: int | None = Field(default=None, ge=1, le=20)
 
 
 class FootprintOverride(WireModel):

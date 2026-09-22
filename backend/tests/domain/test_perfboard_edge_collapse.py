@@ -319,8 +319,8 @@ def test_multiple_candidates_were_routed(seed: int) -> None:
     )
     routed_count = int(result.trace.phase_timings_ms.get("cpsat_routed_count", 0))
     solution_count = int(result.trace.phase_timings_ms.get("cpsat_solution_count", 0))
-    assert routed_count >= 1
-    assert solution_count >= 1
+    assert routed_count >= 2
+    assert solution_count >= 2
 
 
 def test_layout_retains_routing_corridor_around_u1() -> None:

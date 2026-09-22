@@ -1,0 +1,198 @@
+{
+  "format": "autobreadboard-project",
+  "version": 1,
+  "name": "Perf chain-555 regression — user's actual schematic that collapsed into row 1",
+  "board": {
+    "modelId": "strip-15x20-double"
+  },
+  "components": [
+    {
+      "ref": "C1",
+      "value": "100n",
+      "footprintId": "RADIAL-CAP-2P",
+      "pins": ["1", "2"],
+      "locked": false,
+      "tags": ["input", "coupling"]
+    },
+    {
+      "ref": "D1",
+      "value": "1N4148",
+      "footprintId": "AXIAL-DIODE",
+      "pins": ["1", "2"],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "D2",
+      "value": "LED",
+      "footprintId": "LED-2P",
+      "pins": ["1", "2"],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "Q1",
+      "value": "BC547",
+      "footprintId": "TO-92",
+      "pins": ["1", "2", "3"],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "R1",
+      "value": "1k",
+      "footprintId": "AXIAL-R",
+      "pins": ["1", "2"],
+      "locked": false,
+      "tags": []
+    },
+    {
+      "ref": "R2",
+      "value": "10k",
+      "footprintId": "AXIAL-R",
+      "pins": ["1", "2"],
+      "locked": false,
+      "tags": ["timing"]
+    },
+    {
+      "ref": "R3",
+      "value": "100k",
+      "footprintId": "AXIAL-R",
+      "pins": ["1", "2"],
+      "locked": false,
+      "tags": ["timing"]
+    },
+    {
+      "ref": "U1",
+      "value": "555",
+      "footprintId": "DIP-8",
+      "pins": ["1", "2", "3", "4", "5", "6", "7", "8"],
+      "locked": false,
+      "tags": []
+    }
+  ],
+  "nets": [
+    {
+      "id": "net-gnd",
+      "name": "GND",
+      "pins": [
+        {"componentRef": "D2", "pin": "2"},
+        {"componentRef": "Q1", "pin": "3"},
+        {"componentRef": "U1", "pin": "2"},
+        {"componentRef": "U1", "pin": "3"},
+        {"componentRef": "U1", "pin": "4"},
+        {"componentRef": "U1", "pin": "7"}
+      ],
+      "netClass": "ground",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "net-n-1",
+      "name": "N$1",
+      "pins": [
+        {"componentRef": "C1", "pin": "1"},
+        {"componentRef": "D1", "pin": "2"}
+      ],
+      "netClass": "digital",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "net-n-2",
+      "name": "N$2",
+      "pins": [
+        {"componentRef": "C1", "pin": "2"},
+        {"componentRef": "U1", "pin": "1"}
+      ],
+      "netClass": "digital",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "net-n-3",
+      "name": "N$3",
+      "pins": [
+        {"componentRef": "Q1", "pin": "2"},
+        {"componentRef": "U1", "pin": "8"}
+      ],
+      "netClass": "digital",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "net-n-4",
+      "name": "N$4",
+      "pins": [
+        {"componentRef": "Q1", "pin": "1"},
+        {"componentRef": "R1", "pin": "1"}
+      ],
+      "netClass": "digital",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "net-n-5",
+      "name": "N$5",
+      "pins": [
+        {"componentRef": "D2", "pin": "1"},
+        {"componentRef": "R1", "pin": "2"}
+      ],
+      "netClass": "digital",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "net-n-6",
+      "name": "N$6",
+      "pins": [
+        {"componentRef": "R2", "pin": "1"},
+        {"componentRef": "R3", "pin": "1"},
+        {"componentRef": "U1", "pin": "6"}
+      ],
+      "netClass": "digital",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "net-n-7",
+      "name": "N$7",
+      "pins": [
+        {"componentRef": "R2", "pin": "2"},
+        {"componentRef": "R3", "pin": "2"},
+        {"componentRef": "U1", "pin": "5"}
+      ],
+      "netClass": "digital",
+      "priority": 0,
+      "constraints": []
+    },
+    {
+      "id": "net-vcc",
+      "name": "VCC",
+      "pins": [
+        {"componentRef": "D1", "pin": "1"}
+      ],
+      "netClass": "power",
+      "priority": 0,
+      "constraints": []
+    }
+  ],
+  "layout": {
+    "version": 1,
+    "boardId": "strip-15x20-double",
+    "placements": [],
+    "jumpers": [],
+    "manualElectricalLinks": []
+  },
+  "settings": {
+    "seed": 12345,
+    "solverPreset": "balanced",
+    "placementWeights": {},
+    "routingWeights": {},
+    "allowCriticalNetClasses": false,
+    "placementTimeLimitMs": 15000,
+    "placementSolutionCount": 5
+  },
+  "footprintOverrides": [],
+  "schematic": null
+}
