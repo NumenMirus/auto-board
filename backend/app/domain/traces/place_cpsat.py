@@ -17,7 +17,6 @@ engines based on the option value.
 from __future__ import annotations
 
 import dataclasses
-import math
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -78,44 +77,45 @@ _MILLIMETRE_SCALE: int = 100  # 1 mm == 100 integer units (objective is in 1/100
 _BIN_ROWS: int = 3
 _BIN_COLS: int = 3
 _HOT_BIN_THRESHOLD: int = 3  # bin becomes "hot" once >= N components touch it
-# Top-K candidates per (hub, other) net-term pair. Without this cap the
-# model blows up as ``O(nets * len(hub) * len(other))`` — with 200
-# candidates per component on a 6-component fixture, that was 1.6 M
-# Boolean products. The cap keeps it bounded and the proximity-sort keeps
-# the model's optimal-direction intact.
-_NET_PAIR_K: int = 40
-# Tighter cap for the *pin-level* cluster proximity term added on top of
-# the existing centroid-based cluster term. Each member contributes
-# ``_CLUSTER_PIN_K²`` Boolean products; with 200 candidates per
-# component and a 7-member cluster that's ~3 k extra products per
-# member. ``8`` keeps the flagship 8-component + 200-candidate fixture
-# solvable in the default 10 s budget while still giving the
-# pin-anchored term enough candidate diversity to drive
-# functional-cluster locality.
-_CLUSTER_PIN_K: int = 8
+# Cap on (DIP candidate × corridor cell) products in the in-model DIP
+# pin-escape term. Past this count the linearization cost outweighs the
+# benefit, so the term is skipped deterministically. 20 k keeps the
+# flagship fixture under the per-solve budget while leaving the term
+# active for realistic DIP placements.
+_DIP_ESCAPE_PRODUCT_CAP: int = 20000
 
 
 @dataclass(frozen=True, slots=True)
 class CpsatWeights:
     """Integer coefficients for the soft objective terms.
 
-    All terms share the millimetre-scaled unit (``_MILLIMETRE_SCALE``), so
-    ``net=4`` means 0.04 mm of Manhattan distance per unit of net length.
-    Tweak in ``DEFAULT_CPSAT_WEIGHTS``; presets keep these values fixed
-    because only wall-time / candidate caps vary between presets.
+    The objective scales lattice-step quantities by ``_step_q(board)`` so
+    every term lives in the same 1/100 mm unit. Because ``net=16``, a
+    weight ``W`` costs ``W/16`` hole-steps of net length per unit —
+    ``anti_line=400`` therefore pays for ~25 hole-steps of net length
+    per hole of span deficit, and ``row_wall=200`` ~12 hole-steps per
+    extra component parked in one row/column. ``net`` was raised 4x from
+    the original ``4`` so pin-level HPWL competes more strongly for
+    clustering quality within a finite per-solve budget (CP-SAT rarely
+    proves optimality on the flagship fixture, so the *rate* at which
+    the first-found feasible solution improves matters). Tweak in
+    ``DEFAULT_CPSAT_WEIGHTS``; presets keep these values fixed because
+    only wall-time / candidate caps vary between presets.
     """
 
-    net: int = 4
-    cluster: int = 3
-    decoupler: int = 24  # 8x cluster, applied only to bypass caps
-    compactness: int = 1
-    bbox_span: int = 12  # origin-neutral 2D penalty: (x_span + y_span)
-    bbox_area: int = 1  # bounding-box area (loose tie-breaker)
-    anti_line: int = 60  # soft penalty when min(x_span, y_span) collapses
-    pin_proximity: int = 8  # extra weight on pin-pair Manhattan (cluster)
-    row_wall: int = 30  # penalize many components sharing a single row
-    dip_escape: int = 4  # penalize a candidate cell too close to a DIP pin
-    edge: int = 10
+    net: int = 16
+    decoupler: int = 96  # applied per-net to power/ground nets touching bypass caps
+    compactness: int = 1  # bbox-centre offset
+    bbox_span: int = 12  # (x_span + y_span) over the global bbox
+    bbox_area: int = 1  # post-solve only — avoids a quadratic in the model
+    anti_line: int = 400  # penalty per hole of min(x_span, y_span) deficit
+    pin_proximity: int = 8  # post-solve breakdown only — no model term
+    row_wall: int = 200  # penalty per extra component over the row/col cap
+    dip_escape: int = 4  # ~1 hole-step per intruding DIP-pin-corridor cell
+    edge: int = 40  # scaled with ``net``'s 4x bump so a connector's edge
+    # bonus still outweighs the HPWL saving from drifting off the edge
+    # toward a net-connected interior part (e.g. a single flexible
+    # passive on the connector's only net)
     orientation: int = 1
     congestion: int = 2
     mechanical: int = 1
@@ -176,28 +176,8 @@ class CandidatePose:
 # --------------------------------------------------------------------------
 
 
-_TWO_PIN_FLEXIBLE_FOOTPRINTS: frozenset[str] = frozenset(
-    {
-        "AXIAL-R",
-        "AXIAL-DIODE",
-        "RADIAL-CAP-2P",
-        "ELECTROLYTIC-CAP-2P",
-        "LED-2P",
-    }
-)
-
-
-def _is_two_pin_flexible(footprint_id: str) -> bool:
-    return footprint_id in _TWO_PIN_FLEXIBLE_FOOTPRINTS
-
-
 def _is_connector_or_header(footprint_id: str) -> bool:
     return footprint_id.startswith("CONN-") or footprint_id.startswith("HEADER-1x")
-
-
-def _has_clearance_rule(footprint_id: str, footprints: Mapping[str, ThroughHoleFootprint]) -> bool:
-    fp = footprints.get(footprint_id)
-    return bool(fp and any(r.type == "min-clearance-holes" for r in fp.placement_rules))
 
 
 def _centroid_q_for_holes(hole_ids: Iterable[str], pitch_mm: float) -> tuple[int, int]:
@@ -272,46 +252,6 @@ def _pose_to_candidate(
 # --------------------------------------------------------------------------
 
 
-def _cheap_pose_score(
-    cand: CandidatePose,
-    board: PerfboardModel,
-    initial_layout: TraceLayout | None,
-) -> float:
-    """Deterministic cheap score for pre-filter ranking.
-
-    Lower is better. Components of interest (no global minimum):
-    centroid distance to first placed/locked position, span deviation,
-    vertical-orientation bump. Used only for ranking when a component's
-    candidate count exceeds ``placement_candidate_limit``; never rejects a
-    hard-rule-feasible pose.
-    """
-    # Anchor centroid: locked placement centroid, else board centre.
-    bx = (board.cols - 1) * board.pitch_mm
-    by = (board.rows - 1) * board.pitch_mm
-    target_qx = int(round((bx / 2.0) * _MILLIMETRE_SCALE))
-    target_qy = int(round((by / 2.0) * _MILLIMETRE_SCALE))
-    if initial_layout is not None and initial_layout.placements:
-        xs: list[int] = []
-        ys: list[int] = []
-        for p in initial_layout.placements:
-            for hid in p.occupied_hole_ids:
-                row_str, col_str = hid.split("-", 1)
-                row = int(row_str) - 1
-                col = int(col_str) - 1
-                xs.append(int(round(col * board.pitch_mm * _MILLIMETRE_SCALE)))
-                ys.append(int(round(row * board.pitch_mm * _MILLIMETRE_SCALE)))
-        if xs:
-            target_qx = sum(xs) // len(xs)
-            target_qy = sum(ys) // len(ys)
-
-    dx = abs(cand.centroid_q[0] - target_qx)
-    dy = abs(cand.centroid_q[1] - target_qy)
-    distance_score = (dx + dy) / (2.0 * _MILLIMETRE_SCALE)
-
-    vertical = 0.05 if cand.orientation in (90, 270) else 0.0
-    return float(distance_score + vertical)
-
-
 def _enumerated_candidates_for_component(
     *,
     component_ref: str,
@@ -340,6 +280,93 @@ def _assign_pose_ids(candidates: Iterable[CandidatePose]) -> list[CandidatePose]
     return [dataclasses.replace(c, pose_id=i) for i, c in enumerate(out)]
 
 
+def _stratum(cand: CandidatePose, board: PerfboardModel) -> tuple[int, int, int]:
+    """4x4 board-region band plus orientation — the diversity key."""
+    min_col, min_row, _max_col, _max_row = cand.bbox
+    row_band = (min_row - 1) * 4 // max(1, board.rows)
+    col_band = (min_col - 1) * 4 // max(1, board.cols)
+    return (row_band, col_band, cand.orientation)
+
+
+def _stratified_round_robin(
+    cands: list[CandidatePose], *, limit: int, board: PerfboardModel
+) -> list[CandidatePose]:
+    """Round-robin one pose per board-region/orientation stratum until
+    ``limit`` is reached, so the kept pool covers the whole board instead
+    of clustering around one target point. Each stratum's poses are
+    pre-sorted by ``(mech_cost_q, anchor_idx, orientation, span)``."""
+    buckets: dict[tuple[int, int, int], list[CandidatePose]] = {}
+    for c in cands:
+        buckets.setdefault(_stratum(c, board), []).append(c)
+    for buf in buckets.values():
+        buf.sort(
+            key=lambda c: (
+                c.mech_cost_q,
+                c.anchor_idx,
+                c.orientation,
+                -1 if c.span is None else c.span,
+            )
+        )
+    kept: list[CandidatePose] = []
+    bucket_lists = [list(buckets[s]) for s in sorted(buckets)]
+    while len(kept) < limit:
+        advanced = False
+        for buf in bucket_lists:
+            if not buf:
+                continue
+            kept.append(buf.pop(0))
+            advanced = True
+            if len(kept) >= limit:
+                break
+        if not advanced:
+            break
+    return kept
+
+
+def _select_candidates(
+    all_cands: tuple[CandidatePose, ...],
+    *,
+    limit: int,
+    board: PerfboardModel,
+    edge_class: bool,
+) -> list[CandidatePose]:
+    """Deterministic stratified sampling so the kept pool covers the whole
+    board instead of clustering around one target point.
+
+    For connector/header footprints (``edge_class``), candidates are
+    sorted globally by distance to the nearest board boundary instead of
+    region-diverse round-robin — a plain round-robin only guarantees one
+    pose per edge-touching stratum, which a small ``candidate_limit``
+    (few edge strata among many interior ones) can starve out entirely.
+    Distance-to-edge (not literal touch) is the right metric because a
+    footprint carrying a ``min-clearance-holes`` rule can never legally
+    touch row/col 1 or the far row/col — clearance is checked against the
+    board boundary the same as an occupied neighbour, so the closest
+    legal pose always sits exactly ``clearance`` cells in. Connectors
+    genuinely need to hug the board's mounting edge, not spread across
+    its interior like a passive, so global (not stratified) priority is
+    correct here.
+    """
+    if not edge_class:
+        return _stratified_round_robin(list(all_cands), limit=limit, board=board)
+
+    def _edge_dist(c: CandidatePose) -> int:
+        min_col, min_row, max_col, max_row = c.bbox
+        return min(min_col - 1, board.cols - max_col, min_row - 1, board.rows - max_row)
+
+    ordered = sorted(
+        all_cands,
+        key=lambda c: (
+            _edge_dist(c),
+            c.mech_cost_q,
+            c.anchor_idx,
+            c.orientation,
+            -1 if c.span is None else c.span,
+        ),
+    )
+    return ordered[:limit]
+
+
 def build_candidate_poses(
     *,
     board: PerfboardModel,
@@ -347,7 +374,6 @@ def build_candidate_poses(
     components: list[Component],
     locked_placements: list[ComponentPlacement],
     candidate_limit: int,
-    initial_layout: TraceLayout | None = None,
 ) -> tuple[
     Mapping[str, tuple[CandidatePose, ...]],
     Mapping[str, tuple[tuple[str, int], ...]],
@@ -360,12 +386,10 @@ def build_candidate_poses(
     Pre-filter rules:
 
     * drop any pose that collides with a locked placement;
-    * for 2-pin flexible footprints (AXIAL-R, AXIAL-DIODE, RADIAL-CAP-2P,
-      ELECTROLYTIC-CAP-2P, LED-2P) cap to ``candidate_limit`` by a cheap
-      heuristic score (centroid distance + vertical penalty), preserving at
-      least 4 poses per orientation;
-    * keep every pose for DIP, TO-92, TACT-SW-4P, HEADER-1x*, CONN-1x* and
-      any footprint carrying a ``min-clearance-holes`` rule.
+    * for every component over the cap, pick ``candidate_limit`` poses via
+      deterministic stratified sampling so the kept pool covers the
+      whole board instead of clustering around one target point;
+    * keep every pose for components at or under the cap.
     """
     index = _PerfIndex.build(board)
     locked_occupied: set[str] = set()
@@ -388,51 +412,14 @@ def build_candidate_poses(
             locked_occupied=locked_occupied,
         )
 
-        if (
-            not _is_two_pin_flexible(footprint.id)
-            and not _is_connector_or_header(footprint.id)
-            and not _has_clearance_rule(footprint.id, footprints)
-            and len(all_cands) <= candidate_limit
-        ):
-            kept = _assign_pose_ids(all_cands)
-        elif len(all_cands) <= candidate_limit:
+        if len(all_cands) <= candidate_limit:
             kept = _assign_pose_ids(all_cands)
         else:
-            # Cheap-score sort: connectors/headers get an edge-bias so the
-            # cap doesn't strip every edge pose; everything else uses the
-            # plain centroid distance heuristic.
-            is_edge_class = _is_connector_or_header(footprint.id)
-
-            def _cheap(c: CandidatePose) -> tuple[float, int]:
-                base = _cheap_pose_score(c, board, initial_layout)
-                if is_edge_class:
-                    min_col, min_row, max_col, max_row = c.bbox
-                    on_edge = (
-                        min_col == 1 or max_col == board.cols
-                        or min_row == 1 or max_row == board.rows
-                    )
-                    # Make on-edge poses sort first.
-                    return (0.0 if on_edge else 1.0, base)
-                return (base, 0)
-
-            scored = sorted(
-                all_cands,
-                key=lambda c: (
-                    _cheap(c),
-                    c.anchor_idx,
-                    c.orientation,
-                    -1 if c.span is None else c.span,
-                ),
+            edge_class = _is_connector_or_header(footprint.id)
+            selected = _select_candidates(
+                all_cands, limit=candidate_limit, board=board, edge_class=edge_class
             )
-            head = scored[:candidate_limit]
-            head_keys = {(c.anchor_idx, c.orientation) for c in head}
-            by_orient: dict[int, list[CandidatePose]] = {0: [], 90: [], 180: [], 270: []}
-            for c in scored[candidate_limit:]:
-                if (c.anchor_idx, c.orientation) in head_keys:
-                    continue
-                if len(by_orient[c.orientation]) < 4:
-                    by_orient[c.orientation].append(c)
-            kept = _assign_pose_ids(list(head) + [c for cs in by_orient.values() for c in cs])
+            kept = _assign_pose_ids(selected)
 
         out[component.ref] = tuple(kept)
         for c in kept:
@@ -554,64 +541,35 @@ def _manhattan_q(a: tuple[int, int], b: tuple[int, int]) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
-def _pin_hole_for_ref_pin(
-    ref: str,
-    pin: str,
-    candidates: Mapping[str, tuple[CandidatePose, ...]],
-    locked_pin_holes: Mapping[str, Mapping[str, str]],
-    selected_pose: Mapping[str, CandidatePose] | None,
-) -> tuple[int, int] | None:
-    """Return the (col_q, row_q) of ``ref.pin`` in the chosen pose, or None
-    if the pin doesn't exist. ``locked_pin_holes`` wins for locked refs."""
-    if ref in locked_pin_holes and pin in locked_pin_holes[ref]:
-        hid = locked_pin_holes[ref][pin]
-        row_str, col_str = hid.split("-", 1)
-        return (
-            int(round((int(col_str) - 1) * 2.54 * _MILLIMETRE_SCALE)),
-            int(round((int(row_str) - 1) * 2.54 * _MILLIMETRE_SCALE)),
-        )
-    if selected_pose is not None and ref in selected_pose:
-        for pid, hid in selected_pose[ref].pin_holes:
-            if pid == pin:
-                row_str, col_str = hid.split("-", 1)
-                return (
-                    int(round((int(col_str) - 1) * 2.54 * _MILLIMETRE_SCALE)),
-                    int(round((int(row_str) - 1) * 2.54 * _MILLIMETRE_SCALE)),
-                )
-    return None
+def _hole_rc(hole_id: str) -> tuple[int, int]:
+    """``"row-col"`` → ``(row, col)`` as 1-based lattice ints."""
+    row_str, col_str = hole_id.split("-", 1)
+    return int(row_str), int(col_str)
 
 
-def _hub_pin_for_net(
-    net: Net,
-    candidates: Mapping[str, tuple[CandidatePose, ...]],
-    locked_pin_holes: Mapping[str, Mapping[str, str]],
-    selected_pose: Mapping[str, CandidatePose] | None,
-) -> tuple[PinRefLike, tuple[int, int]] | None:
-    """Pick a deterministic hub for the net: highest-degree pin, falling
-    back to lexicographic-first. Returns ``None`` if no pin has a known
-    hole (e.g. all pins are on movable components and we have no selection
-    yet — caller should pre-resolve)."""
-
-    best: tuple[PinRefLike, tuple[int, int], int] | None = None
-    for pin in net.pins:
-        hole = _pin_hole_for_ref_pin(
-            pin.component_ref, pin.pin, candidates, locked_pin_holes, selected_pose
-        )
-        if hole is None:
-            continue
-        deg = sum(1 for p in net.pins if p.component_ref == pin.component_ref)
-        key = (deg, pin.component_ref, pin.pin)
-        if best is None or key > best[2:]:
-            best = (PinRefLike(component_ref=pin.component_ref, pin=pin.pin), hole, key)
-    if best is None:
-        return None
-    return best[0], best[1]
+def _step_q(board: PerfboardModel) -> int:
+    """One lattice step in the objective's 1/100 mm integer unit (254 at 2.54 mm)."""
+    return int(round(board.pitch_mm * _MILLIMETRE_SCALE))
 
 
-@dataclass(frozen=True, slots=True)
-class PinRefLike:
-    component_ref: str
-    pin: str
+def _anti_line_threshold(n_movable: int, board: PerfboardModel) -> int:
+    """Smallest acceptable value of ``min(x_span, y_span)`` in lattice steps.
+
+    A 1-D row/column of ``n`` parts has ``min_span <= 2``; requiring
+    ``(n + 1) // 2`` forces a genuinely two-dimensional region while staying
+    feasible on the board (8 movable parts on any board >= 5 in both axes
+    → threshold 4).
+    """
+    if n_movable < 2:
+        return 0
+    return max(1, min((n_movable + 1) // 2, min(board.rows, board.cols) - 1))
+
+
+def _wall_cap(n_movable: int) -> int:
+    """Max components allowed to share one row (or column) before the
+    row-wall penalty starts. Same rule the post-solve breakdown already
+    used: ``max(2, n * 2 // 5)`` → 3 for 8 movable parts."""
+    return max(2, n_movable * 2 // 5)
 
 
 def _build_bin_to_components(
@@ -647,27 +605,76 @@ def _along_edge(cand: CandidatePose, board: PerfboardModel) -> bool:
     return False
 
 
-def _anchor_centroid_q(
+def _anchor_centre_rc(
     locked_placements: list[ComponentPlacement], board: PerfboardModel
 ) -> tuple[int, int]:
-    """Average centroid of locked placements, or board centre if none."""
+    """Lattice-unit centroid of locked occupied holes, else board centre."""
     if not locked_placements:
-        bx = (board.cols - 1) * board.pitch_mm
-        by = (board.rows - 1) * board.pitch_mm
-        return (
-            int(round((bx / 2.0) * _MILLIMETRE_SCALE)),
-            int(round((by / 2.0) * _MILLIMETRE_SCALE)),
-        )
-    xs: list[int] = []
-    ys: list[int] = []
+        return ((board.cols + 1) // 2, (board.rows + 1) // 2)
+    cols: list[int] = []
+    rows: list[int] = []
     for p in locked_placements:
         for hid in p.occupied_hole_ids:
-            row_str, col_str = hid.split("-", 1)
-            row = int(row_str) - 1
-            col = int(col_str) - 1
-            xs.append(int(round(col * board.pitch_mm * _MILLIMETRE_SCALE)))
-            ys.append(int(round(row * board.pitch_mm * _MILLIMETRE_SCALE)))
-    return (sum(xs) // len(xs), sum(ys) // len(ys)) if xs else (0, 0)
+            row, col = _hole_rc(hid)
+            cols.append(col)
+            rows.append(row)
+    if not cols:
+        return ((board.cols + 1) // 2, (board.rows + 1) // 2)
+    return (sum(cols) // len(cols), sum(rows) // len(rows))
+
+
+def _is_decoupler_net(net: Net, is_decoupler: Mapping[str, bool]) -> bool:
+    """True when the net is power/ground and at least one pin belongs to a
+    bypass-decoupler footprint."""
+    if net.net_class not in ("power", "ground"):
+        return False
+    return any(is_decoupler.get(p.component_ref, False) for p in net.pins)
+
+
+def _pin_coord_vars(
+    model: cp_model.CpModel,
+    *,
+    sel_vars: dict[str, dict[int, cp_model.IntVar]],
+    candidates: Mapping[str, tuple[CandidatePose, ...]],
+    board: PerfboardModel,
+) -> dict[tuple[str, str], tuple[cp_model.IntVar, cp_model.IntVar]]:
+    """``(ref, pin_id) -> (col_var, row_var)`` in 1-based lattice units.
+
+    ``col == sum(col_of_pose * sel_pose)`` is exact because the selection
+    literals are one-hot. This is what lets the objective distinguish U1
+    pin 5 from U1 pin 8 — the old ``pin_centroid_q`` could not.
+    """
+    pin_vars: dict[tuple[str, str], tuple[cp_model.IntVar, cp_model.IntVar]] = {}
+    for ref, cands in candidates.items():
+        if not cands:
+            continue
+        pin_ids = [pid for pid, _hid in cands[0].pin_holes]
+        # Precompute each candidate's own (row, col) per pin id once so the
+        # sum below varies per pose — using ``cands[0]``'s hole for every
+        # pose would make the variable constant regardless of the actual
+        # selection, which defeats exact per-pin HPWL.
+        cand_pin_rc: list[dict[str, tuple[int, int]]] = [
+            {pid: _hole_rc(hid) for pid, hid in c.pin_holes} for c in cands
+        ]
+        for pid in pin_ids:
+            col_var = model.NewIntVar(1, board.cols, f"px_{ref}_{pid}")
+            row_var = model.NewIntVar(1, board.rows, f"py_{ref}_{pid}")
+            model.Add(
+                col_var
+                == sum(
+                    cand_pin_rc[i][pid][1] * sel_vars[ref][c.pose_id]
+                    for i, c in enumerate(cands)
+                )
+            )
+            model.Add(
+                row_var
+                == sum(
+                    cand_pin_rc[i][pid][0] * sel_vars[ref][c.pose_id]
+                    for i, c in enumerate(cands)
+                )
+            )
+            pin_vars[(ref, pid)] = (col_var, row_var)
+    return pin_vars
 
 
 def add_objective_terms(
@@ -682,9 +689,17 @@ def add_objective_terms(
     footprints: dict[str, ThroughHoleFootprint] | None = None,
     weights: CpsatWeights = DEFAULT_CPSAT_WEIGHTS,
 ) -> tuple[list[cp_model.LinearExpr], PlacementObjectiveBreakdown]:
-    """Add every soft objective term to ``model``. Returns the list of
-    linear expressions (for ``model.Minimize(sum(...))``) plus a zero
-    breakdown the caller updates after solving."""
+    """Add every soft objective term to ``model``.
+
+    The model is exact linear over pin coordinates: each (ref, pin_id)
+    has two ``NewIntVar``s bound to the selected pose, so the objective
+    can see U1 pin 5 distinct from U1 pin 8. Net HPWL, global bbox span,
+    row/column walls, and an in-model DIP pin-escape term are all
+    expressed in that linear space; only edge/congestion/mechanical stay
+    as per-pose linear terms. Returns the list of linear expressions
+    (for ``model.Minimize(sum(...))``) plus a zero breakdown the caller
+    updates after solving.
+    """
     terms: list[cp_model.LinearExpr] = []
     breakdown = PlacementObjectiveBreakdown()
 
@@ -719,187 +734,253 @@ def add_objective_terms(
         for ref in candidates
     }
 
-    # Locked pin holes for hub resolution.
+    # Locked pin holes for HPWL constant injection.
     locked_pin_holes: dict[str, dict[str, str]] = {}
     for p in locked_placements:
         locked_pin_holes[p.component_ref] = dict(p.pin_holes)
 
-    # ---- 1. Estimated net length (hub-based, bounded) ----
+    step_q = _step_q(board)
+
+    # ---- 0. Pin coordinate variables (exact, per-pin) ----
+    pin_vars = _pin_coord_vars(
+        model, sel_vars=sel_vars, candidates=candidates, board=board
+    )
+
+    # ---- 1. Net HPWL (exact linear over pin coordinates) ----
     for net in nets:
-        # Hub: first pin (lexicographic) for determinism.
-        sorted_pins = sorted(
-            net.pins, key=lambda p: (p.component_ref, p.pin)
+        xs: list[cp_model.LinearExpr] = []
+        ys: list[cp_model.LinearExpr] = []
+        for pin in net.pins:
+            var = pin_vars.get((pin.component_ref, pin.pin))
+            if var is not None:
+                xs.append(var[0])
+                ys.append(var[1])
+                continue
+            hid = locked_pin_holes.get(pin.component_ref, {}).get(pin.pin)
+            if hid is not None:
+                row, col = _hole_rc(hid)
+                xs.append(model.NewConstant(col))
+                ys.append(model.NewConstant(row))
+        if len(xs) < 2:
+            continue  # single-pin net (e.g. VCC) contributes nothing
+        x_lo = model.NewIntVar(1, board.cols, f"hpwl_xlo_{net.id}")
+        x_hi = model.NewIntVar(1, board.cols, f"hpwl_xhi_{net.id}")
+        y_lo = model.NewIntVar(1, board.rows, f"hpwl_ylo_{net.id}")
+        y_hi = model.NewIntVar(1, board.rows, f"hpwl_yhi_{net.id}")
+        model.AddMinEquality(x_lo, xs)
+        model.AddMaxEquality(x_hi, xs)
+        model.AddMinEquality(y_lo, ys)
+        model.AddMaxEquality(y_hi, ys)
+        hpwl = model.NewIntVar(0, board.cols + board.rows, f"hpwl_{net.id}")
+        model.Add(hpwl == (x_hi - x_lo) + (y_hi - y_lo))
+        net_weight = weights.decoupler if _is_decoupler_net(net, is_decoupler) else weights.net
+        terms.append(net_weight * step_q * hpwl)
+
+    # ---- 2. Global 2-D spread (bbox span + anti-line deficit) ----
+    n_movable = len(candidates)
+    threshold = _anti_line_threshold(n_movable, board)
+    cminx: dict[str, cp_model.IntVar] = {}
+    cmaxx: dict[str, cp_model.IntVar] = {}
+    cminy: dict[str, cp_model.IntVar] = {}
+    cmaxy: dict[str, cp_model.IntVar] = {}
+    cminx_list: list[cp_model.LinearExpr] = []
+    cmaxx_list: list[cp_model.LinearExpr] = []
+    cminy_list: list[cp_model.LinearExpr] = []
+    cmaxy_list: list[cp_model.LinearExpr] = []
+    for ref, cands in candidates.items():
+        if not cands:
+            continue
+        cminx[ref] = model.NewIntVar(1, board.cols, f"cminx_{ref}")
+        cmaxx[ref] = model.NewIntVar(1, board.cols, f"cmaxx_{ref}")
+        cminy[ref] = model.NewIntVar(1, board.rows, f"cminy_{ref}")
+        cmaxy[ref] = model.NewIntVar(1, board.rows, f"cmaxy_{ref}")
+        model.Add(
+            cminx[ref]
+            == sum(c.bbox[0] * sel_vars[ref][c.pose_id] for c in cands)
         )
-        # Resolve hub hole from candidates directly (one of the candidate
-        # poses is selected — we model the hub as the candidate hole of the
-        # component, averaged across selected pose's pin_holes).
-        # Simpler: hub = pin_centroid of the *first* pin's selected pose.
-        hub_ref = sorted_pins[0].component_ref
-        hub_pin = sorted_pins[0].pin
-        hub_cands = candidates.get(hub_ref)
-        if hub_cands:
-            for other in sorted_pins[1:]:
-                other_cands = candidates.get(other.component_ref, ())  # type: ignore[arg-type]
-                if not other_cands:
-                    continue
-                # Cap per-(hub, other) candidate-pair budget so the model
-                # does not blow up. Sort both sides by centroid proximity
-                # to the other's pin centroid so the kept pairs are the
-                # ones that actually compete for the lowest net cost.
-                _k = min(_NET_PAIR_K, len(hub_cands), len(other_cands))
-                hub_top = sorted(
-                    hub_cands,
-                    key=lambda c_h: _manhattan_q(c_h.pin_centroid_q, other_cands[0].pin_centroid_q),
-                )[:_k]
-                other_top = sorted(
-                    other_cands,
-                    key=lambda c_o: _manhattan_q(c_o.pin_centroid_q, hub_cands[0].pin_centroid_q),
-                )[:_k]
-                if len(net.pins) > 6:
-                    # Hub-only approximation: each pin contributes distance
-                    # to the hub (no inter-pin product).
-                    for c_hub in hub_top:
-                        for c_other in other_top:
-                            z = model.NewBoolVar(
-                                f"net_hub_{net.id}_{c_hub.pose_id}_{other.component_ref}_{c_other.pose_id}"
-                            )
-                            model.Add(z <= sel_vars[hub_ref][c_hub.pose_id])
-                            model.Add(z <= sel_vars[other.component_ref][c_other.pose_id])
-                            model.Add(
-                                z
-                                >= sel_vars[hub_ref][c_hub.pose_id]
-                                + sel_vars[other.component_ref][c_other.pose_id]
-                                - 1
-                            )
-                            d = _manhattan_q(c_hub.pin_centroid_q, c_other.pin_centroid_q)
-                            terms.append(weights.net * d * z)
-                    continue
-                # Bounded pairwise: each other pin → hub.
-                for c_hub in hub_top:
-                    for c_other in other_top:
-                        z = model.NewBoolVar(
-                            f"net_pair_{net.id}_{c_hub.pose_id}_{other.component_ref}_{c_other.pose_id}"
-                        )
-                        model.Add(z <= sel_vars[hub_ref][c_hub.pose_id])
-                        model.Add(z <= sel_vars[other.component_ref][c_other.pose_id])
-                        model.Add(
-                            z
-                            >= sel_vars[hub_ref][c_hub.pose_id]
-                            + sel_vars[other.component_ref][c_other.pose_id]
-                            - 1
-                        )
-                        d = _manhattan_q(c_hub.pin_centroid_q, c_other.pin_centroid_q)
-                        terms.append(weights.net * d * z)
+        model.Add(
+            cmaxx[ref]
+            == sum(c.bbox[2] * sel_vars[ref][c.pose_id] for c in cands)
+        )
+        model.Add(
+            cminy[ref]
+            == sum(c.bbox[1] * sel_vars[ref][c.pose_id] for c in cands)
+        )
+        model.Add(
+            cmaxy[ref]
+            == sum(c.bbox[3] * sel_vars[ref][c.pose_id] for c in cands)
+        )
+        cminx_list.append(cminx[ref])
+        cmaxx_list.append(cmaxx[ref])
+        cminy_list.append(cminy[ref])
+        cmaxy_list.append(cmaxy[ref])
+    # Inject locked placements as constants so the spread covers all
+    # board content, not just the movable pieces.
+    for p in locked_placements:
+        cols: list[int] = []
+        rows: list[int] = []
+        for hid in p.occupied_hole_ids:
+            row, col = _hole_rc(hid)
+            cols.append(col)
+            rows.append(row)
+        if cols:
+            cminx_list.append(model.NewConstant(min(cols)))
+            cmaxx_list.append(model.NewConstant(max(cols)))
+            cminy_list.append(model.NewConstant(min(rows)))
+            cmaxy_list.append(model.NewConstant(max(rows)))
 
-    # ---- 2. Cluster proximity (with per-pair K cap) ----
-    # The naive cluster loop produces ``len(anchor_cands) * len(member_cands)``
-    # Boolean linearizations per cluster member — at cap=200 that's 40 k
-    # products per member, blowing up the model. Restrict to the top
-    # ``_NET_PAIR_K`` candidate pairs by centroid distance so each
-    # member contributes at most ``K²`` products. Pairs outside the K are
-    # not modelled, but the proximity heuristic is dominated by the
-    # closest candidates anyway.
-    for member_ref, anchor_ref in cluster_anchor_of.items():
-        if member_ref == anchor_ref:
-            continue
-        if member_ref not in candidates or anchor_ref not in candidates:
-            continue
-        w = weights.decoupler if is_decoupler.get(member_ref, False) else weights.cluster
-        anchor_cands = candidates[anchor_ref]
-        member_cands = candidates[member_ref]
-        _k = min(_NET_PAIR_K, len(anchor_cands), len(member_cands))
-        anchor_top = sorted(
-            anchor_cands,
-            key=lambda c_a: _manhattan_q(c_a.centroid_q, member_cands[0].centroid_q),
-        )[:_k]
-        member_top = sorted(
-            member_cands,
-            key=lambda c_m: _manhattan_q(c_m.centroid_q, anchor_cands[0].centroid_q),
-        )[:_k]
-        for ca in anchor_top:
-            for cm in member_top:
-                z = model.NewBoolVar(
-                    f"cl_{anchor_ref}_{ca.pose_id}_{member_ref}_{cm.pose_id}"
-                )
-                model.Add(z <= sel_vars[anchor_ref][ca.pose_id])
-                model.Add(z <= sel_vars[member_ref][cm.pose_id])
-                model.Add(
-                    z
-                    >= sel_vars[anchor_ref][ca.pose_id]
-                    + sel_vars[member_ref][cm.pose_id]
-                    - 1
-                )
-                d = _manhattan_q(ca.centroid_q, cm.centroid_q)
-                terms.append(w * d * z)
+    gminx = model.NewIntVar(1, board.cols, "gminx")
+    gmaxx = model.NewIntVar(1, board.cols, "gmaxx")
+    gminy = model.NewIntVar(1, board.rows, "gminy")
+    gmaxy = model.NewIntVar(1, board.rows, "gmaxy")
+    model.AddMinEquality(gminx, cminx_list)
+    model.AddMaxEquality(gmaxx, cmaxx_list)
+    model.AddMinEquality(gminy, cminy_list)
+    model.AddMaxEquality(gmaxy, cmaxy_list)
+    span_x = model.NewIntVar(0, board.cols, "span_x")
+    span_y = model.NewIntVar(0, board.rows, "span_y")
+    model.Add(span_x == gmaxx - gminx)
+    model.Add(span_y == gmaxy - gminy)
+    min_span = model.NewIntVar(0, max(board.cols, board.rows), "min_span")
+    model.AddMinEquality(min_span, [span_x, span_y])
+    if threshold > 0:
+        deficit = model.NewIntVar(0, threshold, "anti_line_deficit")
+        model.Add(deficit >= threshold - min_span)
+        terms.append(weights.anti_line * step_q * deficit)
+    terms.append(weights.bbox_span * step_q * (span_x + span_y))
 
-    # ---- 2b. Pin-level cluster proximity (centroid + nearest pin) ----
-    # Stronger, pin-anchored cluster term: for each cluster member,
-    # minimise the Manhattan distance from the member's closest pin to
-    # the anchor's closest pin. This drives functional-cluster locality
-    # even when the two components' body centroids are close but the
-    # *connecting* pin sits on the far side of the package.
-    #
-    # Bounded by ``_CLUSTER_PIN_K`` (smaller than ``_NET_PAIR_K``) — the
-    # cluster pair products already include the centroid-based pair, and
-    # doubling the per-member pair count blows up the model on flagship
-    # fixtures. ``12`` is the largest value that keeps a 6-component +
-    # 200-candidate fixture under the 4 s solve budget.
-    for member_ref, anchor_ref in cluster_anchor_of.items():
-        if member_ref == anchor_ref:
-            continue
-        if member_ref not in candidates or anchor_ref not in candidates:
-            continue
-        w = weights.decoupler if is_decoupler.get(member_ref, False) else weights.cluster
-        anchor_cands = candidates[anchor_ref]
-        member_cands = candidates[member_ref]
-        _k = min(_CLUSTER_PIN_K, len(anchor_cands), len(member_cands))
-        anchor_top = sorted(
-            anchor_cands,
-            key=lambda c_a: _manhattan_q(c_a.pin_centroid_q, member_cands[0].pin_centroid_q),
-        )[:_k]
-        member_top = sorted(
-            member_cands,
-            key=lambda c_m: _manhattan_q(c_m.pin_centroid_q, anchor_cands[0].pin_centroid_q),
-        )[:_k]
-        for ca in anchor_top:
-            for cm in member_top:
-                z = model.NewBoolVar(
-                    f"clpin_{anchor_ref}_{ca.pose_id}_{member_ref}_{cm.pose_id}"
-                )
-                model.Add(z <= sel_vars[anchor_ref][ca.pose_id])
-                model.Add(z <= sel_vars[member_ref][cm.pose_id])
-                model.Add(
-                    z
-                    >= sel_vars[anchor_ref][ca.pose_id]
-                    + sel_vars[member_ref][cm.pose_id]
-                    - 1
-                )
-                d = _manhattan_q(ca.pin_centroid_q, cm.pin_centroid_q)
-                terms.append(w * d * z)
+    # ---- 3. Centring on the bbox centre (replaces per-component pull) ----
+    target_col, target_row = _anchor_centre_rc(locked_placements, board)
+    off_x = model.NewIntVar(0, board.cols, "off_x")
+    off_y = model.NewIntVar(0, board.rows, "off_y")
+    model.AddAbsEquality(off_x, gminx + gmaxx - 2 * target_col)
+    model.AddAbsEquality(off_y, gminy + gmaxy - 2 * target_row)
+    terms.append(weights.compactness * step_q * (off_x + off_y))
 
-    # ---- 3. Compactness ----
-    anchor_centroid = _anchor_centroid_q(locked_placements, board)
+    # ---- 4. Row and column walls ----
+    rows_of: dict[tuple[str, int], set[int]] = {}
+    cols_of: dict[tuple[str, int], set[int]] = {}
     for ref, cands in candidates.items():
         for c in cands:
-            d = _manhattan_q(c.centroid_q, anchor_centroid)
-            terms.append(weights.compactness * d * sel_vars[ref][c.pose_id])
+            rows_set: set[int] = set()
+            cols_set: set[int] = set()
+            for hid in c.occupied_hole_ids:
+                row, col = _hole_rc(hid)
+                rows_set.add(row)
+                cols_set.add(col)
+            rows_of[(ref, c.pose_id)] = rows_set
+            cols_of[(ref, c.pose_id)] = cols_set
+    cap = _wall_cap(n_movable)
+    if n_movable >= 2 and cap >= 0:
+        for r in range(1, board.rows + 1):
+            users: list[cp_model.LinearExpr] = []
+            for ref, cands in candidates.items():
+                matching = [c for c in cands if r in rows_of[(ref, c.pose_id)]]
+                if not matching:
+                    continue
+                users.append(
+                    sum(sel_vars[ref][c.pose_id] for c in matching)
+                )
+            if not users or len(users) <= cap:
+                continue
+            total = sum(users)
+            excess = model.NewIntVar(0, len(users), f"row_excess_{r}")
+            model.Add(excess >= total - cap)
+            terms.append(weights.row_wall * step_q * excess)
+        for c_idx in range(1, board.cols + 1):
+            users = []
+            for ref, cands in candidates.items():
+                matching = [c for c in cands if c_idx in cols_of[(ref, c.pose_id)]]
+                if not matching:
+                    continue
+                users.append(
+                    sum(sel_vars[ref][c.pose_id] for c in matching)
+                )
+            if not users or len(users) <= cap:
+                continue
+            total = sum(users)
+            excess = model.NewIntVar(0, len(users), f"col_excess_{c_idx}")
+            model.Add(excess >= total - cap)
+            terms.append(weights.row_wall * step_q * excess)
 
-    # ---- 4. Connector edge preference ----
+    # ---- 5. DIP pin-escape corridor (in-model, capped) ----
+    # Build occupancy booleans for every hole touched by a non-DIP
+    # candidate. The feasibility model already enforces "at most one
+    # candidate per hole", so a single BoolVar summing the selection
+    # literals is a valid occupancy indicator.
+    nondip_selectors: dict[str, list[cp_model.IntVar]] = {}
+    for ref, cands in candidates.items():
+        for c in cands:
+            if c.footprint_id.startswith("DIP-"):
+                continue
+            for hid in c.occupied_hole_ids:
+                nondip_selectors.setdefault(hid, []).append(sel_vars[ref][c.pose_id])
+    occ_nondip: dict[str, cp_model.IntVar] = {}
+    for hid, literals in nondip_selectors.items():
+        if len(literals) == 1:
+            occ_nondip[hid] = literals[0]
+        else:
+            var = model.NewBoolVar(f"occ_nondip_{hid}")
+            model.Add(var <= sum(literals))
+            occ_nondip[hid] = var
+    dip_pairs: list[tuple[CandidatePose, str, cp_model.IntVar]] = []
+    pair_count = 0
+    for ref, cands in candidates.items():
+        for c in cands:
+            if not c.footprint_id.startswith("DIP-"):
+                continue
+            occupied: set[tuple[int, int]] = {
+                _hole_rc(hid) for hid in c.occupied_hole_ids
+            }
+            for _pid, hid in c.pin_holes:
+                pr, pc = _hole_rc(hid)
+                for dr in (-1, 0, 1):
+                    for dc in (-1, 0, 1):
+                        if abs(dr) + abs(dc) != 1:
+                            continue
+                        rr = pr + dr
+                        cc = pc + dc
+                        if not (1 <= rr <= board.rows and 1 <= cc <= board.cols):
+                            continue
+                        if (rr, cc) in occupied:
+                            continue
+                        corridor_hid = f"{rr}-{cc}"
+                        occ_var = occ_nondip.get(corridor_hid)
+                        if occ_var is None:
+                            continue
+                        pair_count += 1
+                        dip_pairs.append((c, corridor_hid, occ_var))
+    if pair_count <= _DIP_ESCAPE_PRODUCT_CAP:
+        for idx, (c, corridor_hid, occ_var) in enumerate(dip_pairs):
+            sel = sel_vars[c.component_ref][c.pose_id]
+            z = model.NewBoolVar(
+                f"dipescape_{c.component_ref}_{c.pose_id}_{corridor_hid}_{idx}"
+            )
+            model.Add(z <= sel)
+            model.Add(z <= occ_var)
+            model.Add(z >= sel + occ_var - 1)
+            terms.append(weights.dip_escape * step_q * z)
+
+    # ---- 6. Connector edge preference ----
+    # Graded by distance to the nearest board boundary, not literal touch:
+    # a footprint carrying a ``min-clearance-holes`` rule (nearly every
+    # real connector/header) can never legally touch row/col 1 or the far
+    # row/col — the closest legal pose always sits exactly ``clearance``
+    # cells in. Rewarding only a literal touch left the term permanently
+    # inert for those footprints. Negated (subtracted from cost) because
+    # this is a bonus for being near the edge, not a penalty.
     for ref, cands in candidates.items():
         if not cands or not _is_connector_or_header(cands[0].footprint_id):
             continue
         for c in cands:
             min_col, min_row, max_col, max_row = c.bbox
-            edge_score = 0
-            if min_col == 1 or max_col == board.cols:
-                edge_score += weights.edge
-            if min_row == 1 or max_row == board.rows:
-                edge_score += weights.edge
+            edge_dist = min(min_col - 1, board.cols - max_col, min_row - 1, board.rows - max_row)
+            edge_bonus = weights.edge * max(0, 2 - edge_dist)
             if _along_edge(c, board):
-                edge_score += weights.edge // 2
-            terms.append(edge_score * sel_vars[ref][c.pose_id])
+                edge_bonus += weights.edge // 2
+            terms.append(-edge_bonus * sel_vars[ref][c.pose_id])
 
-    # ---- 5. Orientation preference ----
+    # ---- 7. Orientation preference ----
     for ref, cands in candidates.items():
         if not cands:
             continue
@@ -911,7 +992,7 @@ def add_objective_terms(
                 cost = 0
             terms.append(cost * sel_vars[ref][c.pose_id])
 
-    # ---- 6. Congestion (3x3 bins) ----
+    # ---- 8. Congestion (3x3 bins) ----
     bin_to_components = _build_bin_to_components(candidates, board)
     for bin_key, comp_set in bin_to_components.items():
         if len(comp_set) < _HOT_BIN_THRESHOLD:
@@ -922,27 +1003,16 @@ def add_objective_terms(
                 n = sum(
                     1
                     for cell in c.occupied_hole_ids
-                    if int(cell.split("-")[0]) // _BIN_ROWS == rb
-                    and int(cell.split("-")[1]) // _BIN_COLS == cb
+                    if (int(cell.split("-")[0]) - 1) // _BIN_ROWS == rb
+                    and (int(cell.split("-")[1]) - 1) // _BIN_COLS == cb
                 )
                 if n:
                     terms.append(weights.congestion * n * sel_vars[ref][c.pose_id])
 
-    # ---- 7. Mechanical cost ----
+    # ---- 9. Mechanical cost ----
     for ref, cands in candidates.items():
         for c in cands:
             terms.append(weights.mechanical * c.mech_cost_q * sel_vars[ref][c.pose_id])
-
-    # ---- 8. (Spread term retired) ----
-    # Original idea was a pairwise Boolean-linearized penalty when two
-    # movable components picked poses within the same row/col window, so
-    # a fully legal but row-collapsed layout would be penalised. In
-    # practice the model became UNKNOWN at the default cap on flagship
-    # fixtures, and the row-collapse the user reported is fixed by
-    # raising the default ``placement_candidate_limit`` from 100 to 200
-    # — that brings in geometric-diverse candidates naturally and the
-    # existing terms already spread the layout. Re-enable behind a
-    # settings flag if a future fixture needs it.
 
     return terms, breakdown
 
@@ -964,14 +1034,19 @@ def _add_no_good_constraint(
     *,
     sel_vars: dict[str, dict[int, cp_model.IntVar]],
     previous_assignment: Mapping[str, int],
+    min_changes: int = 1,
 ) -> None:
     """Forbid the literal assignment ``previous_assignment`` from reappearing.
 
-    Implementation: at least one component must pick a different pose:
+    Implementation: at least ``min_changes`` components must pick a different
+    pose from ``previous_assignment``.
 
-        sum(1 - sel_vars[ref][previous_assignment[ref]]) >= 1
+        sum(1 - sel_vars[ref][previous_assignment[ref]]) >= min_changes
 
-    Equivalent to the brief's ``sum(s_i for selected) <= n - 1`` form.
+    Equivalent to the brief's ``sum(s_i for selected) <= n - min_changes``
+    form. Raising ``min_changes`` past 1 makes each new candidate differ in
+    many components instead of one, so the diversity pool explores the
+    solution space rather than drifting one hole at a time.
     """
     clauses: list[cp_model.IntVar] = []
     for ref, prev_pose_id in previous_assignment.items():
@@ -981,9 +1056,11 @@ def _add_no_good_constraint(
         clauses.append(var)
     if not clauses:
         return
-    # At least one of the previously selected poses must be unselected.
-    # Equivalently: sum(1 - var) >= 1 ⇔ len - sum(var) >= 1 ⇔ sum(var) <= len-1
-    model.Add(sum(clauses) <= len(clauses) - 1)
+    threshold = max(1, min(min_changes, len(clauses)))
+    # At least ``threshold`` of the previously selected poses must be
+    # unselected. sum(1 - var) >= threshold ⇔ len - sum(var) >= threshold
+    # ⇔ sum(var) <= len - threshold.
+    model.Add(sum(clauses) <= len(clauses) - threshold)
 
 
 # --------------------------------------------------------------------------
@@ -1011,6 +1088,7 @@ class _CandidateOutcome:
     y_span: int = 0
     min_span: int = 0
     max_components_per_row: int = 0
+    line_collapse: int = 0
     dip_escape_violations: int = 0
     single_pin_net_count: int = 0
     validation_error_count: int = 0
@@ -1024,22 +1102,32 @@ class RoutedCandidateRank:
         1. ``validation_error_count``   (must be zero to win)
         2. ``single_pin_net_count``     (must be zero to be fully routed)
         3. ``unrouted_net_count``
-        4. ``min_span``                 (penalty asc; tiny span = line collapse)
-        5. ``max_components_per_row``   (penalty asc; high = row wall)
-        6. ``dip_escape_violations``    (penalty asc; block-traced cells)
-        7. ``via_count``
-        8. ``trace_length_units``
-        9. ``segment_count``
-       10. ``routing_cost_units``
-       11. ``placement_proxy_score``    (final tie-breaker)
-       12. ``candidate_index``          (deterministic final tie-breaker)
+        4. ``line_collapse``            (penalty asc; deficit of min_span vs
+                                          ``_anti_line_threshold``)
+        5. ``dip_escape_violations``    (penalty asc; block-traced cells)
+        6. ``via_count``
+        7. ``trace_length_units``
+        8. ``segment_count``
+        9. ``routing_cost_units``
+       10. ``placement_proxy_score``    (final tie-breaker)
+       11. ``candidate_index``          (deterministic final tie-breaker)
+
+    ``min_span`` was the previous rank field but ordering it ascending
+    preferred the *flattest* candidate — the exact defect it was added
+    to prevent. ``line_collapse`` is a bounded deficit that is ``0`` for
+    every acceptable layout, so it only ever discriminates against
+    degenerate ones and otherwise falls through to real routing quality.
+    ``max_components_per_row`` is dropped from the key because a
+    legitimate dense 2-D cluster with several vertical parts can share a
+    row band without being a wall; it stays as a reported metric on
+    ``_CandidateOutcome`` and the ``cpsat_max_components_per_row`` trace
+    key.
     """
 
     validation_error_count: int
     single_pin_net_count: int
     unrouted_net_count: int
-    min_span: int
-    max_components_per_row: int
+    line_collapse: int
     dip_escape_violations: int
     via_count: int
     trace_length_units: float
@@ -1100,7 +1188,8 @@ def _evaluate_candidate(
         chosen_for_metrics[p.component_ref] = _placement_to_metric_pose(p, footprint_id)
     _min_col, _min_row, _max_col, _max_row, x_span, y_span = _placement_bbox_span(chosen_for_metrics)
     min_span = min(x_span, y_span)
-    max_per_row, _ = _row_distribution(chosen_for_metrics)
+    max_per_row, _ = _axis_distribution(chosen_for_metrics)
+    line_collapse = max(0, _anti_line_threshold(len(candidate), board) - min_span)
     dip_escape = _dip_pin_escape_violations(chosen_for_metrics, board)
     return _CandidateOutcome(
         candidate_index=candidate_index,
@@ -1119,6 +1208,7 @@ def _evaluate_candidate(
         y_span=y_span,
         min_span=min_span,
         max_components_per_row=max_per_row,
+        line_collapse=line_collapse,
         dip_escape_violations=dip_escape,
         single_pin_net_count=single_pin_net_count,
         validation_error_count=len(placement_errors),
@@ -1144,8 +1234,7 @@ def _rank_outcomes(outcomes: list[_CandidateOutcome]) -> _CandidateOutcome:
             validation_error_count=outcome.validation_error_count,
             single_pin_net_count=outcome.single_pin_net_count,
             unrouted_net_count=len(outcome.unrouted_nets),
-            min_span=outcome.min_span,
-            max_components_per_row=outcome.max_components_per_row,
+            line_collapse=outcome.line_collapse,
             dip_escape_violations=outcome.dip_escape_violations,
             via_count=outcome.via_count,
             trace_length_units=outcome.trace_length_mm,
@@ -1262,21 +1351,23 @@ def _placement_bbox_span(chosen: Mapping[str, CandidatePose]) -> tuple[int, int,
     return min_col, min_row, max_col, max_row, x_span, y_span
 
 
-def _row_distribution(chosen: Mapping[str, CandidatePose]) -> tuple[int, int]:
-    """Return ``(max_components_per_row, components_in_max_row)`` for the chosen
-    placements. Used to drive the row-wall anti-collapse penalty.
+def _axis_distribution(chosen: Mapping[str, CandidatePose]) -> tuple[int, int]:
+    """Return ``(max_components_per_row, max_components_per_col)`` for the
+    chosen placements. Drives the row-wall anti-collapse penalty on both
+    axes — a vertical parking strip is the same defect mirrored.
     """
     if not chosen:
         return 0, 0
     by_row: dict[int, set[str]] = {}
+    by_col: dict[int, set[str]] = {}
     for ref, cand in chosen.items():
         for hid in cand.occupied_hole_ids:
-            row_str, _col_str = hid.split("-", 1)
-            by_row.setdefault(int(row_str), set()).add(ref)
-    if not by_row:
-        return 0, 0
-    counts = sorted((len(refs) for refs in by_row.values()), reverse=True)
-    return counts[0], counts[0]
+            row, col = _hole_rc(hid)
+            by_row.setdefault(row, set()).add(ref)
+            by_col.setdefault(col, set()).add(ref)
+    max_per_row = max((len(refs) for refs in by_row.values()), default=0)
+    max_per_col = max((len(refs) for refs in by_col.values()), default=0)
+    return max_per_row, max_per_col
 
 
 def _dip_pin_escape_violations(
@@ -1404,34 +1495,65 @@ def _recompute_breakdown(
             ),
         )
 
-    # 1. Net length (hub-based, same rule as add_objective_terms).
-    for net in nets:
-        sorted_pins = sorted(net.pins, key=lambda p: (p.component_ref, p.pin))
-        if not sorted_pins:
-            continue
-        hub_pin = sorted_pins[0]
-        hub_cand = chosen.get(hub_pin.component_ref) or _locked_cand(
-            hub_pin.component_ref, hub_pin.pin, locked_placements
-        )
-        if hub_cand is None:
-            continue
-        for other in sorted_pins[1:]:
-            other_cand = chosen.get(other.component_ref) or _locked_cand(
-                other.component_ref, other.pin, locked_placements
-            )
-            if other_cand is None:
-                continue
-            d = _manhattan_q(hub_cand.pin_centroid_q, other_cand.pin_centroid_q)
-            breakdown.net_length += weights.net * d
-
-    # 2. Cluster proximity (centroid-based — captures the rough geographic
-    #    layout around an anchor).
-    clusters = build_clusters(components, nets, fp_lookup)
+    step_q = _step_q(board)
+    locked_pin_holes: dict[str, dict[str, str]] = {
+        p.component_ref: dict(p.pin_holes) for p in locked_placements
+    }
     cluster_anchor_of: dict[str, str] = {}
+    clusters = build_clusters(components, nets, fp_lookup)
     for cluster in clusters:
         anchor_ref = cluster.anchor_ref or cluster.id
         for member in cluster.member_refs:
             cluster_anchor_of[member] = anchor_ref
+
+    def _pin_rc(pin_ref) -> tuple[int, int] | None:
+        cand = chosen.get(pin_ref.component_ref)
+        if cand is not None:
+            for pid, hid in cand.pin_holes:
+                if pid == pin_ref.pin:
+                    return _hole_rc(hid)
+            return None
+        hid = locked_pin_holes.get(pin_ref.component_ref, {}).get(pin_ref.pin)
+        return _hole_rc(hid) if hid is not None else None
+
+    is_decoupler: dict[str, bool] = {
+        ref: bool(
+            cluster_anchor_of.get(ref, ref) != ref
+            and _footprint_of(ref, components) in _DECOUPLER_FOOTPRINTS
+        )
+        for ref in chosen
+    }
+
+    # 1. Net length — half-perimeter wire length over actual pin holes,
+    #    mirroring the in-model HPWL term.
+    pin_locs: dict[tuple[str, str], tuple[int, int]] = {}
+    for ref, cand in chosen.items():
+        for pid, hid in cand.pin_holes:
+            pin_locs[(ref, pid)] = _hole_rc(hid)
+    for ref, pins in locked_pin_holes.items():
+        for pid, hid in pins.items():
+            pin_locs[(ref, pid)] = _hole_rc(hid)
+    for net in nets:
+        locs: list[tuple[int, int]] = []
+        for pin in net.pins:
+            loc = _pin_rc(pin) or pin_locs.get((pin.component_ref, pin.pin))
+            if loc is not None:
+                locs.append(loc)
+        if len(locs) < 2:
+            continue
+        cols = [c for _r, c in locs]
+        rows = [r for r, _c in locs]
+        hpwl_lattice = (max(cols) - min(cols)) + (max(rows) - min(rows))
+        net_weight = (
+            weights.decoupler
+            if (net.net_class in ("power", "ground")
+                and any(is_decoupler.get(p.component_ref, False) for p in net.pins))
+            else weights.net
+        )
+        breakdown.net_length += net_weight * step_q * hpwl_lattice
+
+    # 2. Cluster proximity — decoupler-only report. Other cluster
+    #    members' spread is now captured by HPWL.
     for member_ref, anchor_ref in cluster_anchor_of.items():
         if member_ref == anchor_ref:
             continue
@@ -1439,76 +1561,73 @@ def _recompute_breakdown(
         cm = chosen.get(member_ref)
         if ca is None or cm is None:
             continue
-        w = weights.decoupler if _footprint_of(member_ref, components) in _DECOUPLER_FOOTPRINTS else weights.cluster
-        breakdown.cluster_spread += w * _manhattan_q(ca.centroid_q, cm.centroid_q)
+        if not is_decoupler.get(member_ref, False):
+            continue
+        breakdown.cluster_spread += weights.decoupler * _manhattan_q(
+            ca.centroid_q, cm.centroid_q
+        )
 
     # 2b. Pin-pair proximity (the closest 4 pin pairs per net). Captures
     #     the high-priority local connections between two specific pins,
     #     independent of which is the hub.
     breakdown.pin_proximity = weights.pin_proximity * _pin_pair_proximity(chosen, nets)
 
-    # 3. Compactness — kept as a low-weight anchor term so the candidate
-    #    has a deterministic centre of mass to drift toward, but the
-    #    origin-neutral bbox term below carries the main 2D signal.
-    anchor_centroid = _anchor_centroid_q(locked_placements, board)
-    for ref, cand in chosen.items():
-        d = _manhattan_q(cand.centroid_q, anchor_centroid)
-        breakdown.compactness += weights.compactness * d
+    # 3. Compactness — bbox-centre offset, anchored at the locked
+    #    centroid (or board centre if no locked placements).
+    if chosen:
+        target_col, target_row = _anchor_centre_rc(locked_placements, board)
+        _min_col, _min_row, _max_col, _max_row, _, _ = _placement_bbox_span(chosen)
+        breakdown.compactness = (
+            weights.compactness
+            * step_q
+            * (abs(_min_col + _max_col - 2 * target_col)
+               + abs(_min_row + _max_row - 2 * target_row))
+        )
 
     # 3b. Origin-neutral 2D bbox penalty + anti-line-collapse penalty.
     #     Computed once per candidate (not per pair) — stays cheap.
     if chosen:
         _min_col, _min_row, _max_col, _max_row, x_span, y_span = _placement_bbox_span(chosen)
-        # bbox span is in lattice steps; multiply by 1/100 mm to keep
-        # the same integer-unit scale as the rest of the breakdown.
-        breakdown.bbox_span = weights.bbox_span * int(
-            round((x_span + y_span) * 2.54 * _MILLIMETRE_SCALE)
-        )
+        # bbox span is in lattice steps; multiply by step_q to keep the
+        # same integer-unit scale as the rest of the breakdown.
+        breakdown.bbox_span = weights.bbox_span * step_q * (x_span + y_span)
         breakdown.bbox_area = weights.bbox_area * int(
             round((x_span + 1) * (y_span + 1) * (2.54 * _MILLIMETRE_SCALE) ** 2 / _MILLIMETRE_SCALE)
         )
-        # Anti-line collapse: soft penalty when min(x_span, y_span) is
-        # small relative to the other axis. Threshold scales with the
-        # number of movable components so an 8-component circuit with
-        # span (16, 1) is decisively penalised, while a deliberately
-        # linear header strip is left alone because the
-        # ``linear_components`` exemption below zeroes its contribution.
-        n_movable = len(chosen)
-        if n_movable >= 2:
-            lo, hi = sorted((x_span, y_span))
-            # Threshold: a 2D cluster's smaller axis should be at least
-            # ceil(sqrt(n_movable) / 2) holes for n >= 4. Below that,
-            # pay the anti-line penalty proportional to the deficit.
-            threshold = max(1, int(math.ceil(math.sqrt(n_movable) / 2)))
-            if lo < threshold:
-                breakdown.anti_line = weights.anti_line * (threshold - lo) * n_movable
+        # Anti-line collapse: single-axis deficit against the threshold.
+        threshold = _anti_line_threshold(len(chosen), board)
+        if threshold > 0:
+            min_span = min(x_span, y_span)
+            if min_span < threshold:
+                breakdown.anti_line = (
+                    weights.anti_line * step_q * (threshold - min_span)
+                )
 
-    # 3c. Row-wall penalty: many components sharing a single row.
+    # 3c. Row-wall penalty: linear, two-axis, matching the in-model term.
     if chosen and not _is_linear_layout_allowed(chosen, fp_lookup):
-        max_per_row, _ = _row_distribution(chosen)
+        max_per_row, max_per_col = _axis_distribution(chosen)
         n_movable = len(chosen)
-        # More than ~40 % of movable components in one row triggers a
-        # penalty that grows quadratically with the excess.
-        if max_per_row > max(2, n_movable * 2 // 5):
-            excess = max_per_row - max(2, n_movable * 2 // 5)
-            breakdown.row_wall = weights.row_wall * excess * excess
+        cap = _wall_cap(n_movable)
+        row_excess = max(0, max_per_row - cap)
+        col_excess = max(0, max_per_col - cap)
+        breakdown.row_wall = (
+            weights.row_wall * step_q * (row_excess + col_excess)
+        )
 
     # 3d. DIP-pin escape corridor penalty.
     breakdown.dip_escape = weights.dip_escape * _dip_pin_escape_violations(chosen, board)
 
-    # 4. Edge.
+    # 4. Edge — graded bonus (negative contribution), mirrors the in-model
+    #    term. See ``add_objective_terms`` term 6 for the rationale.
     for ref, cand in chosen.items():
         if not _is_connector_or_header(cand.footprint_id):
             continue
         min_col, min_row, max_col, max_row = cand.bbox
-        edge_score = 0
-        if min_col == 1 or max_col == board.cols:
-            edge_score += weights.edge
-        if min_row == 1 or max_row == board.rows:
-            edge_score += weights.edge
+        edge_dist = min(min_col - 1, board.cols - max_col, min_row - 1, board.rows - max_row)
+        edge_bonus = weights.edge * max(0, 2 - edge_dist)
         if _along_edge(cand, board):
-            edge_score += weights.edge // 2
-        breakdown.edge += edge_score
+            edge_bonus += weights.edge // 2
+        breakdown.edge -= edge_bonus
 
     # 5. Orientation.
     for ref, cand in chosen.items():
@@ -1519,9 +1638,7 @@ def _recompute_breakdown(
     bin_to_components: dict[tuple[int, int], set[str]] = {}
     for ref, cand in chosen.items():
         for cell in cand.occupied_hole_ids:
-            row_str, col_str = cell.split("-", 1)
-            row = int(row_str)
-            col = int(col_str)
+            row, col = _hole_rc(cell)
             rb = (row - 1) // _BIN_ROWS
             cb = (col - 1) // _BIN_COLS
             bin_to_components.setdefault((rb, cb), set()).add(ref)
@@ -1534,8 +1651,8 @@ def _recompute_breakdown(
             n = sum(
                 1
                 for cell in cand.occupied_hole_ids
-                if int(cell.split("-")[0]) // _BIN_ROWS == rb
-                and int(cell.split("-")[1]) // _BIN_COLS == cb
+                if (int(cell.split("-")[0]) - 1) // _BIN_ROWS == rb
+                and (int(cell.split("-")[1]) - 1) // _BIN_COLS == cb
             )
             breakdown.congestion += weights.congestion * n
 
@@ -1735,7 +1852,6 @@ def solve_cpsat_placement(
         components=[c for c in components if c.ref not in locked_refs],
         locked_placements=locked_placements,
         candidate_limit=candidate_limit,
-        initial_layout=initial_layout,
     )
 
     if progress is not None:
@@ -1785,25 +1901,66 @@ def solve_cpsat_placement(
         progress("place", 20)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = max(0.1, time_limit_ms / 1000.0)
     solver.parameters.num_search_workers = 1
     solver.parameters.random_seed = options.solver_seed
     solver.parameters.log_search_progress = False
 
+    def _apply_solve_budget(this_solve_ms: int) -> None:
+        """Bound the next ``Solve()`` by deterministic work, not wall-clock
+        time. ``max_time_in_seconds`` alone makes CP-SAT's truncated
+        (non-optimal) search machine/load-dependent — two runs with an
+        identical ``time_limit_ms`` can explore different amounts of the
+        search tree depending on real CPU speed at that moment, so the
+        result differs even with the same ``random_seed``. Verified
+        empirically: two solves with the same ``max_deterministic_time``
+        return bit-identical placements; two solves with the same
+        ``max_time_in_seconds`` do not. The wall-clock cap stays as a
+        generous (3x), normally-non-binding safety net against a
+        pathologically slow host.
+        """
+        this_solve_s = this_solve_ms / 1000.0
+        solver.parameters.max_deterministic_time = this_solve_s
+        solver.parameters.max_time_in_seconds = max(60.0, this_solve_s * 3.0)
+
+
     # Loop: solve, extract, no-good, solve again, up to solution_count.
-    routing_budget_ms = max(200, int(0.4 * time_limit_ms))
+    # Routing + validation is empirically ~5ms per candidate for perfboard
+    # fixtures (maze build + trace route + diagnostics), so the budget
+    # carve-out for it only needs a small fixed floor, not a fraction of
+    # ``time_limit_ms`` — nearly everything should go to solving.
+    routing_budget_ms = max(300, int(0.05 * time_limit_ms))
     solving_budget_ms = time_limit_ms - routing_budget_ms
-    # Give the first solve 60 % of the solving budget (it's the one most
-    # likely to find OPTIMAL; subsequent no-good solves share the rest).
-    if solution_count > 1:
-        first_solve_ms = max(100, int(0.6 * solving_budget_ms))
-        per_solve_ms = max(
-            50,
-            (solving_budget_ms - first_solve_ms) // max(1, solution_count - 1),
-        )
-    else:
-        first_solve_ms = max(50, solving_budget_ms)
-        per_solve_ms = 0
+    # The first solve gets the majority (70%) of the solving budget.
+    # Measured on the flagship 8-component fixture at ``candidate_limit=200``:
+    # CP-SAT reaches *any* feasible solution in ~2.5s, but the exact
+    # pin-coordinate HPWL term only pulls related parts close together
+    # (e.g. a timing resistor next to its IC pin) if the solver keeps
+    # improving past that first solution — at a 3s budget target pin
+    # pairs sit 7-13 lattice steps apart, at 10s they sit 2-6 apart. A
+    # solve is NOT stopped early on the first solution found: CP-SAT
+    # already returns as soon as it proves OPTIMAL/INFEASIBLE, so a
+    # generous budget only costs time when the solver has genuine room
+    # to improve. Remaining solves exist purely for ranking diversity
+    # and share what's left of the budget; the floor still guarantees
+    # each one a realistic chance to find something.
+    #
+    # Budgets are computed once, statically, from ``time_limit_ms`` —
+    # NOT from wall-clock elapsed time. CP-SAT's time-limited search is
+    # not bit-for-bit reproducible across different ``max_time_in_seconds``
+    # values even with a fixed ``random_seed``, so deriving the per-solve
+    # budget from ``time.perf_counter()`` (which jitters a few ms between
+    # otherwise-identical runs) made two calls with identical options
+    # return different layouts. A static split trades a little adaptivity
+    # for exact determinism.
+    _SOLVE_FLOOR_S = 2.0
+    _FIRST_SOLVE_SHARE = 0.7
+    first_solve_ms = max(int(_SOLVE_FLOOR_S * 1000), int(solving_budget_ms * _FIRST_SOLVE_SHARE))
+    rest_budget_ms = max(0, solving_budget_ms - first_solve_ms)
+    per_solve_ms = (
+        max(int(_SOLVE_FLOOR_S * 1000), rest_budget_ms // max(1, solution_count - 1))
+        if solution_count > 1
+        else 0
+    )
 
     collected: list[tuple[list[ComponentPlacement], PlacementObjectiveBreakdown]] = []
     previous_assignment: dict[str, int] = {}
@@ -1812,10 +1969,8 @@ def solve_cpsat_placement(
     for k in range(solution_count):
         if cancel is not None and cancel():
             raise SolverCancelled("cpsat placement cancelled during search")
-        # First solve gets the larger budget; subsequent ones share the
-        # remainder via per_solve_ms.
         this_solve_ms = first_solve_ms if k == 0 else per_solve_ms
-        solver.parameters.max_time_in_seconds = max(0.1, this_solve_ms / 1000.0)
+        _apply_solve_budget(this_solve_ms)
         status = solver.Solve(model)
         last_status = status
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1851,7 +2006,10 @@ def solve_cpsat_placement(
             progress("place", 25 + int(60 * (k + 1) / solution_count))
         if k < solution_count - 1:
             _add_no_good_constraint(
-                model, sel_vars=sel_vars, previous_assignment=previous_assignment
+                model,
+                sel_vars=sel_vars,
+                previous_assignment=previous_assignment,
+                min_changes=max(1, len(previous_assignment) // 2),
             )
 
     if progress is not None:
@@ -1877,7 +2035,6 @@ def solve_cpsat_placement(
             components=[c for c in components if c.ref not in locked_refs],
             locked_placements=locked_placements,
             candidate_limit=retry_limit,
-            initial_layout=initial_layout,
         )
         model, sel_vars = build_cpsat_model(
             candidates=candidates,
@@ -1899,7 +2056,7 @@ def solve_cpsat_placement(
             if cancel is not None and cancel():
                 raise SolverCancelled("cpsat placement cancelled during retry")
             this_solve_ms = first_solve_ms if k == 0 else per_solve_ms
-            solver.parameters.max_time_in_seconds = max(0.1, this_solve_ms / 1000.0)
+            _apply_solve_budget(this_solve_ms)
             status = solver.Solve(model)
             last_status = status
             if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1932,7 +2089,10 @@ def solve_cpsat_placement(
                 progress("place", 25 + int(60 * (k + 1) / solution_count))
             if k < solution_count - 1:
                 _add_no_good_constraint(
-                    model, sel_vars=sel_vars, previous_assignment=previous_assignment
+                    model,
+                    sel_vars=sel_vars,
+                    previous_assignment=previous_assignment,
+                    min_changes=max(1, len(previous_assignment) // 2),
                 )
 
     # Routing-aware selection.
