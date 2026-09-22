@@ -617,25 +617,43 @@
             />
           </g>
         {:else if node.portKind === 'ground'}
-          <g class="port port-ground" stroke={selected ? 'var(--accent-1)' : 'var(--wire-gnd)'}>
-            <line x1="0" y1="0" x2="0" y2={SCHEMATIC_SCALE * 1} stroke-width="1.6" />
-            <line x1="-1.6" y1={SCHEMATIC_SCALE * 1} x2="1.6" y2={SCHEMATIC_SCALE * 1} stroke-width="1.6" />
-            <line x1="-1" y1={SCHEMATIC_SCALE * 1.4} x2="1" y2={SCHEMATIC_SCALE * 1.4} stroke-width="1.6" />
-            <line x1="-0.5" y1={SCHEMATIC_SCALE * 1.8} x2="0.5" y2={SCHEMATIC_SCALE * 1.8} stroke-width="1.6" />
+          {@const gColor = selected ? 'var(--accent-1)' : 'var(--wire-gnd)'}
+          <g transform="scale({SCHEMATIC_SCALE})">
+            <g class="port port-ground" stroke-linecap="round">
+              <!-- vertical lead from terminal down to the longest bar -->
+              <line x1="0" y1="0" x2="0" y2="2" stroke={gColor} stroke-width="0.18" />
+              <!-- IEEE earth/chassis ground: three decreasing horizontal bars -->
+              <line x1="-3.2" y1="2" x2="3.2" y2="2" stroke={gColor} stroke-width="0.28" />
+              <line x1="-2.2" y1="2.7" x2="2.2" y2="2.7" stroke={gColor} stroke-width="0.24" />
+              <line x1="-1.2" y1="3.4" x2="1.2" y2="3.4" stroke={gColor} stroke-width="0.2" />
+              <!-- subtle filled wedge so the icon reads as a single object even at small zoom -->
+              <polygon points="-3.2,2 3.2,2 0,4" fill={gColor} opacity="0.08" stroke="none" />
+            </g>
           </g>
         {:else if node.portKind === 'power'}
-          <g class="port port-power" stroke={selected ? 'var(--accent-1)' : 'var(--wire-vcc)'}>
-            <text
-              x="0"
-              y={-SCHEMATIC_SCALE * 0.4}
-              text-anchor="middle"
-              font-family="var(--font-mono)"
-              font-size={SCHEMATIC_SCALE * 0.9}
-              fill="var(--ink-3)"
-              stroke="none"
-            >{node.netName}</text>
-            <line x1="0" y1="0" x2="0" y2={-SCHEMATIC_SCALE * 1} stroke-width="1.6" />
-            <line x1="-1.6" y1={-SCHEMATIC_SCALE * 1} x2="1.6" y2={-SCHEMATIC_SCALE * 1} stroke-width="1.6" />
+          {@const pColor = selected ? 'var(--accent-1)' : 'var(--wire-vcc)'}
+          <g transform="scale({SCHEMATIC_SCALE})">
+            <g class="port port-power" stroke-linecap="round">
+              <!-- vertical lead from terminal up to the rail -->
+              <line x1="0" y1="0" x2="0" y2="-2" stroke={pColor} stroke-width="0.18" />
+              <!-- horizontal rail bar -->
+              <line x1="-3.2" y1="-2" x2="3.2" y2="-2" stroke={pColor} stroke-width="0.26" />
+              <!-- IEEE-style DC supply: filled circle with a + inside -->
+              <circle cx="0" cy="-3.4" r="1.1" fill="var(--paper-1)" stroke={pColor} stroke-width="0.2" />
+              <line x1="-0.6" y1="-3.4" x2="0.6" y2="-3.4" stroke={pColor} stroke-width="0.18" />
+              <line x1="0" y1="-4" x2="0" y2="-2.8" stroke={pColor} stroke-width="0.18" />
+              <!-- net label above the rail so the wire stays clean -->
+              <text
+                x="0"
+                y="-5.2"
+                text-anchor="middle"
+                font-family="var(--font-mono)"
+                font-size="1.1"
+                font-weight="600"
+                fill={pColor}
+                stroke="none"
+              >{node.netName}</text>
+            </g>
           </g>
         {:else}
           <g class="port port-label" stroke={selected ? 'var(--accent-1)' : 'var(--ink-2)'}>

@@ -154,15 +154,30 @@
             onclick={() => onArmPort?.(entry.portKind)}
             title={`Drag ${entry.label} onto the schematic`}
           >
-            <svg width={PREVIEW_W} height={PREVIEW_H} viewBox="0 0 6 4" aria-hidden="true" focusable="false">
+            <svg width={PREVIEW_W} height={PREVIEW_H} viewBox="0 0 6 5" aria-hidden="true" focusable="false">
               {#if entry.portKind === 'ground'}
-                <line x1="3" y1="0" x2="3" y2="1.5" stroke="var(--ink-1)" stroke-width="0.18" />
-                <line x1="1.2" y1="2" x2="4.8" y2="2" stroke="var(--ink-1)" stroke-width="0.28" stroke-linecap="round" />
-                <line x1="1.8" y1="2.9" x2="4.2" y2="2.9" stroke="var(--ink-1)" stroke-width="0.24" stroke-linecap="round" />
-                <line x1="2.4" y1="3.7" x2="3.6" y2="3.7" stroke="var(--ink-1)" stroke-width="0.22" stroke-linecap="round" />
+                <!-- matches the canvas port: terminal at top, glyph drawn below -->
+                <line x1="3" y1="0" x2="3" y2="2" stroke="var(--wire-gnd)" stroke-width="0.18" />
+                <polygon points="-0.2,2 6.2,2 3,4" fill="var(--wire-gnd)" opacity="0.1" stroke="none" />
+                <line x1="-0.2" y1="2" x2="6.2" y2="2" stroke="var(--wire-gnd)" stroke-width="0.28" stroke-linecap="round" />
+                <line x1="0.8" y1="2.7" x2="5.2" y2="2.7" stroke="var(--wire-gnd)" stroke-width="0.24" stroke-linecap="round" />
+                <line x1="1.8" y1="3.4" x2="4.2" y2="3.4" stroke="var(--wire-gnd)" stroke-width="0.2" stroke-linecap="round" />
               {:else if entry.portKind === 'power'}
-                <line x1="3" y1="4" x2="3" y2="2.2" stroke="var(--ink-1)" stroke-width="0.18" />
-                <line x1="1.2" y1="1.6" x2="4.8" y2="1.6" stroke="var(--ink-1)" stroke-width="0.32" stroke-linecap="round" />
+                <!-- matches the canvas port: terminal at bottom, glyph drawn above -->
+                <line x1="3" y1="5" x2="3" y2="3" stroke="var(--wire-vcc)" stroke-width="0.18" />
+                <line x1="-0.2" y1="3" x2="6.2" y2="3" stroke="var(--wire-vcc)" stroke-width="0.26" stroke-linecap="round" />
+                <circle cx="3" cy="1.6" r="1.1" fill="var(--paper-1)" stroke="var(--wire-vcc)" stroke-width="0.2" />
+                <line x1="2.4" y1="1.6" x2="3.6" y2="1.6" stroke="var(--wire-vcc)" stroke-width="0.18" stroke-linecap="round" />
+                <line x1="3" y1="1" x2="3" y2="2.2" stroke="var(--wire-vcc)" stroke-width="0.18" stroke-linecap="round" />
+                <text
+                  x="3"
+                  y="-0.1"
+                  text-anchor="middle"
+                  font-family="var(--font-mono)"
+                  font-size="0.8"
+                  font-weight="600"
+                  fill="var(--wire-vcc)"
+                >{entry.defaultNetName}</text>
               {:else}
                 <line x1="0.5" y1="2" x2="1.6" y2="2" stroke="var(--ink-1)" stroke-width="0.18" />
                 <rect x="1.6" y="1" width="3.4" height="2" fill="none" stroke="var(--ink-1)" stroke-width="0.18" rx="0.2" />

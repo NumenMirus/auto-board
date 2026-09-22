@@ -142,10 +142,11 @@ export function symbolBounds(shape: SymbolShape, pins: readonly string[]): Symbo
 }
 
 /** Drawn extents of a port glyph in grid units (the canvas draws these in
- *  SVG px at `SCHEMATIC_SCALE`; these are those numbers divided by 10). */
+ *  SVG px at `SCHEMATIC_SCALE`; these are those numbers divided by 10).
+ *  Must stay in sync with the port glyphs in `lib/components/SchematicCanvas.svelte`. */
 export function portBounds(portKind: SchematicPortKind): SymbolRect {
-  if (portKind === 'ground') return { minX: -0.3, minY: 0, maxX: 0.3, maxY: 1.9 };
-  if (portKind === 'power') return { minX: -1.5, minY: -1.7, maxX: 1.5, maxY: 0.1 };
+  if (portKind === 'ground') return { minX: -3.2, minY: 0, maxX: 3.2, maxY: 4 };
+  if (portKind === 'power') return { minX: -3.2, minY: -5.2, maxX: 3.2, maxY: 0.1 };
   return { minX: -0.3, minY: -1.9, maxX: 3.3, maxY: 0.1 };
 }
 
